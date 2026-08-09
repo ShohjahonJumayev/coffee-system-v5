@@ -1,33 +1,226 @@
-<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Coffee System v5</title><link rel="stylesheet" href="style.css"></head><body>
-<div id="login"><div class="box"><div class="logo">☕</div><h1>Coffee System</h1><input id="u" value="admin" placeholder="Логин"><input id="p" type="password" value="admin123" placeholder="Пароль"><button id="loginBtn">Войти</button><div id="msg"></div></div></div>
-<div id="app" class="hide"><aside><h2>☕ Coffee</h2><button class="nav" data-page="dash">📊 Dashboard</button><button class="nav" data-page="cash">🧾 Касса</button><button class="nav" data-page="goods">☕ Товары</button><button class="nav" data-page="warehouse">📦 Склад</button><button class="nav" data-page="recipes">🧪 Рецепты</button><button class="nav" data-page="ops">📜 Операции</button><button class="nav" data-page="expenses">💸 Расходы</button><button id="logout">🚪 Выйти</button></aside><main>
-<section id="dash"><h1>Dashboard</h1><div class="cards"><div>💰 В кассе<strong id="cashSum">0 сум</strong></div><div>📈 Продажи<strong id="salesSum">0 сум</strong></div><div>💳 Карта<strong id="cardSum">0 сум</strong></div></div><div class="panel"><h2>Последние операции</h2><div id="recent"></div></div></section>
-<section id="cash" class="hide"><h1>Касса</h1><div class="panel"><div id="buttons" class="grid"></div><h2>Итого: <span id="total">0</span> сум</h2><button id="cashPay">💵 Наличные</button><button id="cardPay">💳 Карта</button><button id="clear">Очистить</button></div><div class="panel"><button id="in">➕ Внести деньги</button><button id="out">➖ Изъять деньги</button></div></section>
-<section id="warehouse" class="hide">
-<h1>📦 Склад</h1><p class="muted">Учет остатков продуктов и расходников.</p>
-<div class="panel">
-<h2>➕ Добавить на склад</h2>
-<input id="warehouseName" class="form-input" placeholder="Название, например: Молоко">
-<input id="warehouseQty" class="form-input" type="number" min="0" step="0.01" placeholder="Количество">
-<input id="warehouseUnit" class="form-input" value="шт" placeholder="Единица: шт, кг, л">
-<button id="warehouseAdd" class="green">Добавить</button>
-</div>
-<div class="panel"><h2>Остатки</h2><div id="warehouseList"></div></div>
-</section>
-<section id="recipes" class="hide">
-<h1>🧪 Рецепты</h1><p class="muted">Укажи, сколько каждого складского продукта списывать при продаже.</p>
-<div class="panel"><div id="recipeProductSelect"></div><div id="recipeEditor"></div></div>
-</section>
-<section id="goods" class="hide">
-<h1>Товары</h1>
-<p class="muted">Добавляй новые товары и изменяй цены.</p>
-<div class="panel">
-  <h2>➕ Новый товар</h2>
-  <input id="newProductName" class="form-input" placeholder="Название товара">
-  <input id="newProductPrice" class="form-input" type="number" min="1" placeholder="Цена в сумах">
-  <button id="addProduct" class="green">Добавить товар</button>
-</div>
-<div class="panel" id="goodsList"></div>
-</section>
-<section id="ops" class="hide"><h1>Операции</h1><div class="panel" id="opsList"></div></section><section id="expenses" class="hide"><h1>Расходы</h1><div class="cards"><div>💸 Всего расходов<strong id="expenseTotal">0 сум</strong></div></div><div class="panel"><h2>История расходов</h2><div id="expenseList"></div></div></section>
-</main></div><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Coffee System v6</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="login" class="login-screen">
+    <div class="login-card">
+      <div class="login-logo">☕</div>
+      <h1>Coffee System</h1>
+      <p class="subtext">Управление кофейней</p>
+      <input id="u" class="input" value="admin" placeholder="Логин">
+      <input id="p" class="input" type="password" value="admin123" placeholder="Пароль">
+      <button id="loginBtn" class="btn btn-dark btn-full">Войти</button>
+      <div id="msg" class="error-text"></div>
+    </div>
+  </div>
+
+  <div id="app" class="app-shell hide">
+    <div id="overlay" class="overlay"></div>
+
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">☕</div>
+        <div>
+          <div class="brand-title">Coffee System</div>
+          <div class="brand-subtitle">Admin Panel</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <button class="nav-btn active" data-page="dash">📊 <span>Dashboard</span></button>
+        <button class="nav-btn" data-page="cash">🧾 <span>Касса</span></button>
+        <button class="nav-btn" data-page="goods">☕ <span>Товары</span></button>
+        <button class="nav-btn" data-page="warehouse">📦 <span>Склад</span></button>
+        <button class="nav-btn" data-page="recipes">🧪 <span>Рецепты</span></button>
+        <button class="nav-btn" data-page="ops">📜 <span>Операции</span></button>
+        <button class="nav-btn" data-page="expenses">💸 <span>Расходы</span></button>
+      </nav>
+
+      <button id="logout" class="logout-btn">🚪 Выйти</button>
+    </aside>
+
+    <main class="main">
+      <header class="mobile-header">
+        <button id="menuToggle" class="menu-btn">☰</button>
+        <div class="mobile-title">Coffee System</div>
+      </header>
+
+      <section id="dash" class="page">
+        <div class="page-head">
+          <div>
+            <h1>Dashboard</h1>
+            <p class="subtext">Общий обзор кофейни</p>
+          </div>
+        </div>
+
+        <div class="stats-grid">
+          <div class="stat-card">
+            <span>💰 В кассе</span>
+            <strong id="cashSum">0 сум</strong>
+          </div>
+          <div class="stat-card">
+            <span>📈 Продажи</span>
+            <strong id="salesSum">0 сум</strong>
+          </div>
+          <div class="stat-card">
+            <span>💳 Продажи картой</span>
+            <strong id="cardSum">0 сум</strong>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Последние операции</h2>
+          </div>
+          <div id="recent" class="list"></div>
+        </div>
+      </section>
+
+      <section id="cash" class="page hide">
+        <div class="page-head">
+          <div>
+            <h1>Касса</h1>
+            <p class="subtext">Выбирай товары и проводи продажу</p>
+          </div>
+          <div class="cash-summary">
+            <span>Позиций: <b id="cartCount">0</b></span>
+            <span>Итого: <b id="total">0</b> сум</span>
+          </div>
+        </div>
+
+        <div class="cash-layout">
+          <div class="card">
+            <div class="card-head"><h2>Товары</h2></div>
+            <div id="buttons" class="products-grid"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Текущий чек</h2></div>
+            <div id="cartList" class="list"></div>
+            <div class="action-row">
+              <button id="cashPay" class="btn btn-green">💵 Наличные</button>
+              <button id="cardPay" class="btn btn-primary">💳 Карта</button>
+              <button id="clear" class="btn btn-light">Очистить</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Операции с кассой</h2></div>
+          <div class="action-row">
+            <button id="in" class="btn btn-green">➕ Внести деньги</button>
+            <button id="out" class="btn btn-red">➖ Изъять деньги</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="goods" class="page hide">
+        <div class="page-head">
+          <div>
+            <h1>Товары</h1>
+            <p class="subtext">Добавляй новые товары и меняй цены</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Новый товар</h2></div>
+          <div class="form-grid">
+            <input id="newProductName" class="input" placeholder="Название товара">
+            <input id="newProductPrice" class="input" type="number" min="1" placeholder="Цена в сумах">
+          </div>
+          <div class="action-row">
+            <button id="addProduct" class="btn btn-green">Добавить товар</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Список товаров</h2></div>
+          <div id="goodsList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="warehouse" class="page hide">
+        <div class="page-head">
+          <div>
+            <h1>Склад</h1>
+            <p class="subtext">Учет остатков продуктов и расходников</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Добавить на склад</h2></div>
+          <div class="form-grid triple">
+            <input id="warehouseName" class="input" placeholder="Название, например: Молоко">
+            <input id="warehouseQty" class="input" type="number" min="0" step="0.01" placeholder="Количество">
+            <input id="warehouseUnit" class="input" value="шт" placeholder="Единица: шт, кг, л">
+          </div>
+          <div class="action-row">
+            <button id="warehouseAdd" class="btn btn-green">Добавить</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Остатки</h2></div>
+          <div id="warehouseList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="recipes" class="page hide">
+        <div class="page-head">
+          <div>
+            <h1>Рецепты</h1>
+            <p class="subtext">Автоматическое списание со склада при продаже</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Настройка рецепта</h2></div>
+          <div id="recipeProductSelect"></div>
+          <div id="recipeEditor"></div>
+        </div>
+      </section>
+
+      <section id="ops" class="page hide">
+        <div class="page-head">
+          <div>
+            <h1>Операции</h1>
+            <p class="subtext">Вся история действий по кассе</p>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>История операций</h2></div>
+          <div id="opsList" class="list"></div>
+        </div>
+      </section>
+
+      <section id="expenses" class="page hide">
+        <div class="page-head">
+          <div>
+            <h1>Расходы</h1>
+            <p class="subtext">Расходы и причины изъятия денег</p>
+          </div>
+        </div>
+
+        <div class="stats-grid one">
+          <div class="stat-card">
+            <span>💸 Всего расходов</span>
+            <strong id="expenseTotal">0 сум</strong>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>История расходов</h2></div>
+          <div id="expenseList" class="list"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
