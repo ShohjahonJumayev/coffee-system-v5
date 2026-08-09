@@ -1,14 +1,28 @@
 <!doctype html>
 <html lang="ru">
-<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#7c4a2d"><title>Меню кофейни</title><link rel="stylesheet" href="menu.css"></head>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#7c4a2d"><title>In coffee — меню</title><link rel="stylesheet" href="menu.css"></head>
 <body>
-<header class="menu-head"><div class="menu-logo">☕</div><div><h1>Меню кофейни</h1><p id="branchName">Выберите напитки и отправьте заказ</p></div></header>
+<header class="menu-head"><div class="menu-logo">☕</div><div class="menu-brand"><h1>In coffee</h1><p id="branchName">Выберите напитки и отправьте заказ</p></div><button id="accountBtn" class="account-btn">Войти</button></header>
 <main class="menu-main">
   <div class="branch-box"><label>Филиал</label><select id="branchSelect"></select></div>
   <div id="categories" class="chips"></div>
   <div id="products" class="menu-grid"></div>
 </main>
 <div class="cart-bar"><div><small>Итого</small><b><span id="total">0</span> сум</b></div><button id="openCart">Корзина · <span id="count">0</span></button></div>
-<div id="drawer" class="drawer hide"><div class="drawer-card"><div class="drawer-head"><h2>Ваш заказ</h2><button id="closeCart">×</button></div><div id="cartList"></div><div class="total-row"><span>Итого</span><b><span id="drawerTotal">0</span> сум</b></div><input id="customerName" placeholder="Ваше имя"><input id="customerPhone" type="tel" placeholder="Телефон"><button id="sendOrder" class="send">Отправить заказ</button><p class="note">Оплата производится в кофейне при получении.</p></div></div>
-<div id="success" class="success-modal hide"><div><div class="big">✅</div><h2>Заказ отправлен!</h2><p id="successText"></p><button onclick="location.reload()">Готово</button></div></div>
+
+<div id="drawer" class="drawer hide"><div class="drawer-card"><div class="drawer-head"><h2>Ваш заказ</h2><button id="closeCart">×</button></div><div id="cartList"></div><div class="total-row"><span>Итого</span><b><span id="drawerTotal">0</span> сум</b></div>
+<div id="checkoutAccount" class="checkout-account"></div>
+<div class="section-label">Как получить заказ?</div>
+<div class="payment-box receive-box"><label class="payment-option"><input type="radio" name="deliveryType" value="pickup" checked><span><b>🏪 Самовывоз</b><small>Заберу из выбранного филиала</small></span></label><label class="payment-option"><input type="radio" name="deliveryType" value="delivery"><span><b>🚗 Доставка</b><small>Привезти по указанному адресу</small></span></label></div>
+<div id="deliveryBox" class="delivery-box hide"><input id="deliveryAddress" placeholder="Адрес доставки: улица, дом, квартира"><div class="map-actions"><button id="findAddress" type="button">🔎 Найти адрес</button><button id="myLocation" type="button">📍 Моё местоположение</button></div><div id="deliveryMap" class="delivery-map"><div id="mapPlaceholder" class="map-placeholder">Яндекс Карта загрузится здесь</div></div><input id="deliveryComment" placeholder="Комментарий курьеру: подъезд, этаж, ориентир"><small id="mapHint" class="map-hint">Укажите адрес или поставьте точку на карте.</small></div>
+<div class="section-label">Оплата</div><div class="payment-box"><label class="payment-option"><input type="radio" name="paymentMethod" value="cash" checked><span><b>При получении</b><small>Наличные или карта</small></span></label><label id="paymeOption" class="payment-option hide"><input type="radio" name="paymentMethod" value="payme"><span><b>Payme</b><small>Оплатить онлайн сейчас</small></span></label></div><button id="sendOrder" class="send">Оформить заказ</button><p id="paymentNote" class="note">Для заказа нужен аккаунт клиента.</p></div></div>
+
+<div id="authModal" class="modal-layer hide"><div class="auth-card"><div class="drawer-head"><h2 id="authTitle">Вход</h2><button id="closeAuth">×</button></div>
+<div id="authFormStep"><div class="auth-tabs"><button id="loginTab" class="active">Вход</button><button id="registerTab">Регистрация</button></div><input id="authName" class="hide" placeholder="Ваше имя"><input id="authPhone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67"><input id="authPassword" type="password" placeholder="Пароль, минимум 8 символов"><button id="authSubmit" class="send">Войти</button><p class="note">При регистрации номер подтверждается SMS-кодом.</p></div>
+<div id="otpStep" class="hide"><div class="otp-icon">📱</div><h3>Подтвердите номер</h3><p id="otpText" class="note"></p><input id="authCode" class="otp-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000"><button id="verifyCode" class="send">Подтвердить код</button><div class="otp-actions"><button id="resendCode" type="button">Отправить код повторно</button><button id="backAuth" type="button">Назад</button></div></div>
+<p id="authError" class="auth-error"></p></div></div>
+
+<div id="profileModal" class="modal-layer hide"><div class="profile-card"><div class="drawer-head"><div><h2>Мой аккаунт</h2><small id="profilePhone"></small><div id="profileVerified" class="verify-badge"></div></div><button id="closeProfile">×</button></div><div class="profile-name"><input id="profileName" placeholder="Имя"><button id="saveProfile">Сохранить</button></div><div class="profile-actions"><button id="verifyPhone" class="verify-action hide">Подтвердить телефон</button><button id="changePassword">Сменить пароль</button><button id="logoutCustomer" class="danger">Выйти</button></div><h3>История заказов и платежей</h3><div id="historyList" class="history-list"></div></div></div>
+
+<div id="success" class="success-modal hide"><div><div class="big">✅</div><h2>Заказ отправлен!</h2><p id="successText"></p><button id="successDone">Готово</button></div></div>
 <script src="menu.js"></script></body></html>

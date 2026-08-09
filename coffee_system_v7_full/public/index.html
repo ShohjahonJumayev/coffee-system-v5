@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#111827">
-  <title>Coffee System v7</title>
+  <title>In coffee</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
 <div id="login" class="login-screen">
   <div class="login-card">
     <div class="login-logo">☕</div>
-    <h1>Coffee System</h1>
+    <h1>In coffee</h1>
     <p class="muted center">Управление кофейней</p>
     <input id="loginUser" class="input" placeholder="Логин" autocomplete="username">
     <input id="loginPassword" class="input" type="password" placeholder="Пароль" autocomplete="current-password">
@@ -27,7 +27,7 @@
   <aside id="sidebar" class="sidebar">
     <div class="brand">
       <div class="brand-icon">☕</div>
-      <div><b>Coffee System</b><small>v7</small></div>
+      <div><b>In coffee</b><small>v10</small></div>
     </div>
     <nav id="nav" class="nav">
       <button data-page="dashboard" data-roles="owner,admin,cashier" class="active">📊 <span>Главная</span></button>
@@ -102,7 +102,7 @@
 
     <section id="page-products" class="page hide">
       <div class="page-head"><div><h1>Товары</h1><p class="muted">Меню, категории и цены.</p></div></div>
-      <div class="card form-card"><h2>Добавить товар</h2><div class="form-grid three"><input id="productName" class="input" placeholder="Название"><input id="productCategory" class="input" placeholder="Категория, например Кофе"><input id="productPrice" class="input" type="number" placeholder="Цена, сум"></div><button id="addProduct" class="btn success">Добавить</button></div>
+      <div class="card form-card"><h2>Добавить товар</h2><div class="form-grid four"><input id="productName" class="input" placeholder="Название"><input id="productCategory" class="input" placeholder="Категория, например Кофе"><input id="productPrice" class="input" type="number" placeholder="Цена, сум"><label class="file-input">📷 Фото<input id="productImage" type="file" accept="image/jpeg,image/png,image/webp"></label></div><button id="addProduct" class="btn success">Добавить</button><p class="muted tiny">Фото автоматически уменьшается перед загрузкой. JPG, PNG или WebP.</p></div>
       <div class="card"><div id="productsList" class="list"></div></div>
     </section>
 
@@ -120,7 +120,7 @@
 
     <section id="page-reports" class="page hide">
       <div class="page-head"><div><h1>Отчёты</h1><p class="muted">Продажи, расходы и прибыль.</p></div><select id="reportPeriod" class="select"><option value="today">Сегодня</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="30d">Последние 30 дней</option></select></div>
-      <div class="stats five"><div class="stat"><span>Продажи</span><strong id="repSales">0</strong></div><div class="stat"><span>Наличные</span><strong id="repCash">0</strong></div><div class="stat"><span>Карта</span><strong id="repCard">0</strong></div><div class="stat"><span>Расходы</span><strong id="repExpenses">0</strong></div><div class="stat accent"><span>Прибыль*</span><strong id="repProfit">0</strong></div></div>
+      <div class="stats six"><div class="stat"><span>Продажи</span><strong id="repSales">0</strong></div><div class="stat"><span>Наличные</span><strong id="repCash">0</strong></div><div class="stat"><span>Карта</span><strong id="repCard">0</strong></div><div class="stat"><span>Онлайн</span><strong id="repOnline">0</strong></div><div class="stat"><span>Расходы</span><strong id="repExpenses">0</strong></div><div class="stat accent"><span>Прибыль*</span><strong id="repProfit">0</strong></div></div>
       <div class="grid-2"><div class="card"><div class="card-title"><h2>Топ товаров</h2></div><div id="topProducts" class="list"></div></div><div class="card"><div class="card-title"><h2>Продажи по дням</h2></div><div id="dailyBars" class="bars"></div></div></div>
       <p class="muted tiny">* Прибыль здесь считается как продажи минус расходы из кассы. Себестоимость отдельно не рассчитывается.</p>
     </section>
@@ -137,7 +137,8 @@
 
     <section id="page-customers" class="page hide">
       <div class="page-head"><div><h1>QR-меню для клиентов</h1><p class="muted">Клиент сканирует QR, выбирает товары и отправляет заказ.</p></div></div>
-      <div class="card qr-card"><img id="menuQr" alt="QR код"><div><h2>Ссылка на меню</h2><p id="menuUrl" class="url-box"></p><div class="actions"><button id="copyMenuUrl" class="btn primary">Скопировать ссылку</button><a id="openMenuUrl" class="btn secondary" target="_blank" rel="noopener">Открыть меню</a></div></div></div>
+      <div class="card qr-card"><div class="qr-preview"><img id="menuQr" alt="QR код In coffee"><span>Высокое качество · H</span></div><div><h2>QR-меню In coffee</h2><p class="muted">PNG 1800 px подходит для обычной печати. SVG остаётся чётким при любом размере.</p><p id="menuUrl" class="url-box"></p><div class="actions"><button id="copyMenuUrl" class="btn primary">Скопировать ссылку</button><a id="openMenuUrl" class="btn secondary" target="_blank" rel="noopener">Открыть меню</a><a id="downloadQrPng" class="btn success">⬇ PNG 1800px</a><a id="downloadQrSvg" class="btn secondary">⬇ SVG</a></div></div></div>
+      <div class="card"><div class="card-title"><h2>Онлайн-оплата</h2><span id="paymeBadge" class="status">Проверка…</span></div><p id="paymeInfo" class="muted"></p><p id="paymeEndpoint" class="url-box"></p></div>
     </section>
 
     <section id="page-users" class="page hide">

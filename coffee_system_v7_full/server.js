@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const QRCode = require('qrcode');
+const multer = require('multer');
 const { Pool, types } = require('pg');
 
 types.setTypeParser(20, v => Number(v));
@@ -19,6 +20,20 @@ const SESSION_SECRET = process.env.SESSION_SECRET || (NODE_ENV === 'production' 
 const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || (NODE_ENV === 'production' ? '' : 'admin123');
 const PUBLIC_URL = String(process.env.PUBLIC_URL || '').replace(/\/$/, '');
+const PAYME_MERCHANT_ID = String(process.env.PAYME_MERCHANT_ID || '').trim();
+const PAYME_LOGIN = String(process.env.PAYME_LOGIN || '').trim();
+const PAYME_KEY = String(process.env.PAYME_KEY || '').trim();
+const PAYME_TEST_KEY = String(process.env.PAYME_TEST_KEY || '').trim();
+const PAYME_TEST_MODE = String(process.env.PAYME_TEST_MODE || 'false').toLowerCase() === 'true';
+const PAYME_ACCOUNT_FIELD = 'order_id';
+const YANDEX_MAPS_API_KEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
+const ESKIZ_EMAIL = String(process.env.ESKIZ_EMAIL || '').trim();
+const ESKIZ_PASSWORD = String(process.env.ESKIZ_PASSWORD || '').trim();
+const ESKIZ_FROM = String(process.env.ESKIZ_FROM || '4546').trim();
+const OTP_TTL_MINUTES = 5;
+const OTP_MAX_ATTEMPTS = 5;
+const OTP_RESEND_SECONDS = 60;
+const OTP_MAX_SENDS_PER_HOUR = 5;
 
 if (!DATABASE_URL) {
   console.error('DATABASE_URL is required');
@@ -48,8 +63,15 @@ app.use(express.json({ limit: '200kb' }));
 app.use(express.urlencoded({ extended: false }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+const imageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 3 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => cb(null, ['image/jpeg','image/png','image/webp'].includes(file.mimetype))
+});
+
 const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 const orderLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false });
+const smsLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Слишком много запросов SMS. Попробуйте позже.' } });
 
 function cookieValue(req, name) {
   const raw = req.headers.cookie || '';
@@ -76,6 +98,161 @@ function clearAuthCookie(res) {
   const attrs = ['coffee_token=', 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
   if (NODE_ENV === 'production') attrs.push('Secure');
   res.setHeader('Set-Cookie', attrs.join('; '));
+}
+
+function setCustomerCookie(res, token) {
+  const attrs = [
+    `customer_token=${encodeURIComponent(token)}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${30 * 24 * 60 * 60}`,
+  ];
+  if (NODE_ENV === 'production') attrs.push('Secure');
+  const existing = res.getHeader('Set-Cookie');
+  res.setHeader('Set-Cookie', existing ? [].concat(existing, attrs.join('; ')) : attrs.join('; '));
+}
+
+function clearCustomerCookie(res) {
+  const attrs = ['customer_token=', 'Path=/', 'HttpOnly', 'SameSite=Lax', 'Max-Age=0'];
+  if (NODE_ENV === 'production') attrs.push('Secure');
+  const existing = res.getHeader('Set-Cookie');
+  res.setHeader('Set-Cookie', existing ? [].concat(existing, attrs.join('; ')) : attrs.join('; '));
+}
+
+function signCustomer(customer) {
+  return jwt.sign({ id: customer.id, kind: 'customer' }, SESSION_SECRET, { expiresIn: '30d' });
+}
+
+function normalizePhone(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 9) digits = '998' + digits;
+  if (digits.length < 9 || digits.length > 15) return null;
+  return '+' + digits;
+}
+
+function normalizeCustomerPhone(value) {
+  let digits = String(value || '').replace(/\D/g, '');
+  if (digits.length === 9) digits = '998' + digits;
+  if (!/^998\d{9}$/.test(digits)) return null;
+  return '+' + digits;
+}
+
+function smsConfigured() {
+  return Boolean(ESKIZ_EMAIL && ESKIZ_PASSWORD);
+}
+
+function otpHash(phone, purpose, code) {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(`${phone}|${purpose}|${code}`).digest('hex');
+}
+
+function secureOtpCode() {
+  return String(crypto.randomInt(100000, 1000000));
+}
+
+let eskizTokenCache = '';
+async function getEskizToken(force = false) {
+  if (!smsConfigured()) throw new Error('SMS-подтверждение пока не настроено');
+  if (eskizTokenCache && !force) return eskizTokenCache;
+  const body = new FormData();
+  body.append('email', ESKIZ_EMAIL);
+  body.append('password', ESKIZ_PASSWORD);
+  const response = await fetch('https://notify.eskiz.uz/api/auth/login', { method: 'POST', body });
+  let data = {};
+  try { data = await response.json(); } catch {}
+  const token = data?.data?.token;
+  if (!response.ok || !token) throw new Error('Не удалось авторизоваться в SMS-сервисе');
+  eskizTokenCache = token;
+  return token;
+}
+
+async function sendEskizSms(phone, message, retry = true) {
+  const token = await getEskizToken(false);
+  const body = new FormData();
+  body.append('mobile_phone', String(phone).replace(/^\+/, ''));
+  body.append('message', message);
+  if (ESKIZ_FROM) body.append('from', ESKIZ_FROM);
+  const response = await fetch('https://notify.eskiz.uz/api/message/sms/send', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body
+  });
+  if (response.status === 401 && retry) {
+    eskizTokenCache = '';
+    await getEskizToken(true);
+    return sendEskizSms(phone, message, false);
+  }
+  let data = {};
+  try { data = await response.json(); } catch {}
+  if (!response.ok) throw new Error(data?.message || 'SMS не отправлено');
+  return data;
+}
+
+async function createAndSendOtp({ phone, purpose, payload = {} }) {
+  if (!smsConfigured()) {
+    const error = new Error('SMS-подтверждение пока не подключено. Добавьте данные Eskiz в Render.');
+    error.status = 503;
+    throw error;
+  }
+  const now = Date.now();
+  const existing = (await pool.query('SELECT send_count,window_started_at,resend_available_at FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2', [phone,purpose])).rows[0];
+  let sendCount = Number(existing?.send_count || 0);
+  let windowStarted = existing?.window_started_at ? new Date(existing.window_started_at).getTime() : now;
+  if (!Number.isFinite(windowStarted) || now - windowStarted >= 60 * 60 * 1000) {
+    sendCount = 0;
+    windowStarted = now;
+  }
+  if (existing?.resend_available_at && new Date(existing.resend_available_at).getTime() > now) {
+    const seconds = Math.ceil((new Date(existing.resend_available_at).getTime() - now) / 1000);
+    const error = new Error(`Повторный код можно отправить через ${seconds} сек.`);
+    error.status = 429;
+    throw error;
+  }
+  if (sendCount >= OTP_MAX_SENDS_PER_HOUR) {
+    const error = new Error('Слишком много SMS на этот номер. Попробуйте через час.');
+    error.status = 429;
+    throw error;
+  }
+  const code = secureOtpCode();
+  const expiresAt = new Date(now + OTP_TTL_MINUTES * 60 * 1000);
+  const resendAt = new Date(now + OTP_RESEND_SECONDS * 1000);
+  await sendEskizSms(phone, `In coffee: kod podtverzhdeniya ${code}. Nikomu ne soobshchayte.`);
+  await pool.query(`INSERT INTO customer_sms_verifications(phone,purpose,code_hash,payload,expires_at,attempts,send_count,window_started_at,resend_available_at,created_at,updated_at)
+    VALUES($1,$2,$3,$4,$5,0,$6,$7,$8,NOW(),NOW())
+    ON CONFLICT(phone,purpose) DO UPDATE SET code_hash=EXCLUDED.code_hash,payload=EXCLUDED.payload,expires_at=EXCLUDED.expires_at,attempts=0,send_count=EXCLUDED.send_count,window_started_at=EXCLUDED.window_started_at,resend_available_at=EXCLUDED.resend_available_at,updated_at=NOW()`,
+    [phone,purpose,otpHash(phone,purpose,code),JSON.stringify(payload),expiresAt,sendCount+1,new Date(windowStarted),resendAt]);
+  return { ok:true, expiresIn: OTP_TTL_MINUTES * 60, resendIn: OTP_RESEND_SECONDS };
+}
+
+async function verifyOtp(phone, purpose, code) {
+  const row = (await pool.query('SELECT * FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2', [phone,purpose])).rows[0];
+  if (!row) return { ok:false, status:400, error:'Сначала запросите SMS-код' };
+  if (Number(row.attempts || 0) >= OTP_MAX_ATTEMPTS) return { ok:false, status:429, error:'Слишком много неверных попыток. Запросите новый код.' };
+  if (new Date(row.expires_at).getTime() < Date.now()) return { ok:false, status:400, error:'Код истёк. Запросите новый.' };
+  const supplied = otpHash(phone,purpose,String(code||'').trim());
+  const expected = String(row.code_hash || '');
+  const good = supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
+  if (!good) {
+    await pool.query('UPDATE customer_sms_verifications SET attempts=attempts+1,updated_at=NOW() WHERE phone=$1 AND purpose=$2', [phone,purpose]);
+    return { ok:false, status:400, error:'Неверный SMS-код' };
+  }
+  return { ok:true, record:row };
+}
+
+async function customerAuth(req, res, next) {
+  try {
+    const token = cookieValue(req, 'customer_token');
+    if (!token) return res.status(401).json({ error: 'Войдите в аккаунт клиента' });
+    const data = jwt.verify(token, SESSION_SECRET);
+    if (data.kind !== 'customer') return res.status(401).json({ error: 'Неверная сессия' });
+    const { rows } = await pool.query('SELECT id,name,phone,phone_verified,active,created_at FROM customer_accounts WHERE id=$1', [data.id]);
+    const customer = rows[0];
+    if (!customer || !customer.active) return res.status(401).json({ error: 'Аккаунт недоступен' });
+    req.customer = customer;
+    next();
+  } catch {
+    return res.status(401).json({ error: 'Сессия клиента истекла' });
+  }
 }
 
 function signUser(user) {
@@ -138,6 +315,60 @@ function saleMethodLabel(method) {
   return method === 'cash' ? 'Наличные' : method === 'card' ? 'Карта' : 'Онлайн';
 }
 
+
+function originFor(req) {
+  return PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
+}
+
+function paymeSecret() {
+  return PAYME_TEST_MODE ? PAYME_TEST_KEY : PAYME_KEY;
+}
+
+function paymeConfigured() {
+  return Boolean(PAYME_MERCHANT_ID && PAYME_LOGIN && paymeSecret());
+}
+
+function paymeCheckoutUrl(orderId, totalSum, branchId, req) {
+  if (!paymeConfigured()) return null;
+  const checkoutBase = PAYME_TEST_MODE ? 'https://test.paycom.uz' : 'https://checkout.paycom.uz';
+  const callback = `${originFor(req)}/menu.html?branch=${Number(branchId)}&payment_order=${Number(orderId)}`;
+  const params = [
+    `m=${PAYME_MERCHANT_ID}`,
+    `ac.${PAYME_ACCOUNT_FIELD}=${Number(orderId)}`,
+    `a=${Math.round(Number(totalSum) * 100)}`,
+    'l=ru',
+    `c=${encodeURIComponent(callback)}`,
+    'ct=2500'
+  ].join(';');
+  return `${checkoutBase}/${Buffer.from(params, 'utf8').toString('base64')}`;
+}
+
+function paymeRpcError(id, code, ru, data) {
+  const error = { code, message: { ru, uz: ru, en: ru } };
+  if (data !== undefined) error.data = data;
+  return { error, id: id ?? null };
+}
+
+function paymeRpcResult(id, result) {
+  return { result, id: id ?? null };
+}
+
+function parseBasicAuth(req) {
+  const raw = String(req.headers.authorization || '');
+  if (!raw.startsWith('Basic ')) return null;
+  try {
+    const decoded = Buffer.from(raw.slice(6), 'base64').toString('utf8');
+    const pos = decoded.indexOf(':');
+    if (pos < 0) return null;
+    return { login: decoded.slice(0,pos), password: decoded.slice(pos+1) };
+  } catch { return null; }
+}
+
+function productSelect(prefix='') {
+  const p = prefix ? prefix + '.' : '';
+  return `${p}id,${p}name,${p}category,${p}price,${p}active,CASE WHEN ${p}image_data IS NOT NULL THEN '/media/products/'||${p}id ELSE '' END AS image_url`;
+}
+
 async function initDb() {
   const client = await pool.connect();
   try {
@@ -166,6 +397,8 @@ async function initDb() {
         category TEXT NOT NULL DEFAULT 'Кофе',
         price BIGINT NOT NULL CHECK (price >= 0),
         active BOOLEAN NOT NULL DEFAULT TRUE,
+        image_mime TEXT,
+        image_data BYTEA,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE IF NOT EXISTS inventory_items (
@@ -222,13 +455,46 @@ async function initDb() {
         reason TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS customer_accounts (
+        id BIGSERIAL PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        phone_verified BOOLEAN NOT NULL DEFAULT FALSE,
+        active BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS customer_sms_verifications (
+        phone TEXT NOT NULL,
+        purpose TEXT NOT NULL CHECK (purpose IN ('register','verify_existing')),
+        code_hash TEXT NOT NULL,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        expires_at TIMESTAMPTZ NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        send_count INTEGER NOT NULL DEFAULT 0,
+        window_started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resend_available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        PRIMARY KEY(phone,purpose)
+      );
       CREATE TABLE IF NOT EXISTS online_orders (
         id BIGSERIAL PRIMARY KEY,
         branch_id INTEGER NOT NULL REFERENCES branches(id),
+        customer_id BIGINT REFERENCES customer_accounts(id) ON DELETE SET NULL,
         customer_name TEXT NOT NULL,
         customer_phone TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'new' CHECK (status IN ('new','accepted','ready','completed','cancelled')),
         total BIGINT NOT NULL CHECK (total >= 0),
+        payment_method TEXT NOT NULL DEFAULT 'cash',
+        payment_status TEXT NOT NULL DEFAULT 'unpaid',
+        paid_at TIMESTAMPTZ,
+        delivery_type TEXT NOT NULL DEFAULT 'pickup',
+        delivery_address TEXT NOT NULL DEFAULT '',
+        delivery_lat DOUBLE PRECISION,
+        delivery_lng DOUBLE PRECISION,
+        delivery_comment TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
       CREATE TABLE IF NOT EXISTS online_order_items (
@@ -239,6 +505,21 @@ async function initDb() {
         price BIGINT NOT NULL,
         quantity INTEGER NOT NULL CHECK (quantity > 0)
       );
+      CREATE TABLE IF NOT EXISTS payme_transactions (
+        payme_id TEXT PRIMARY KEY,
+        order_id BIGINT NOT NULL REFERENCES online_orders(id) ON DELETE CASCADE,
+        time_ms BIGINT NOT NULL,
+        amount_tiyin BIGINT NOT NULL,
+        create_time_ms BIGINT NOT NULL,
+        perform_time_ms BIGINT NOT NULL DEFAULT 0,
+        cancel_time_ms BIGINT NOT NULL DEFAULT 0,
+        state INTEGER NOT NULL DEFAULT 1,
+        reason INTEGER,
+        fiscal_perform JSONB,
+        fiscal_cancel JSONB
+      );
+      CREATE INDEX IF NOT EXISTS idx_payme_order ON payme_transactions(order_id);
+      CREATE INDEX IF NOT EXISTS idx_payme_time ON payme_transactions(time_ms);
       CREATE INDEX IF NOT EXISTS idx_sales_branch_created ON sales(branch_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_cash_branch_created ON cash_operations(branch_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_orders_branch_created ON online_orders(branch_id, created_at DESC);
@@ -246,9 +527,27 @@ async function initDb() {
       CREATE INDEX IF NOT EXISTS idx_inventory_movements_branch_created ON inventory_movements(branch_id,created_at DESC);
     `);
 
+    await client.query(`
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_mime TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS image_data BYTEA;
+      ALTER TABLE customer_accounts ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS customer_id BIGINT REFERENCES customer_accounts(id) ON DELETE SET NULL;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'unpaid';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'pickup';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_address TEXT NOT NULL DEFAULT '';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_lat DOUBLE PRECISION;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_lng DOUBLE PRECISION;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_comment TEXT NOT NULL DEFAULT '';
+      CREATE INDEX IF NOT EXISTS idx_orders_customer_created ON online_orders(customer_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_customer_phone ON customer_accounts(phone);
+    `);
+    await client.query("UPDATE branches SET name='In coffee' WHERE name='Основной филиал'");
+
     const branchCount = Number((await client.query('SELECT COUNT(*)::int AS c FROM branches')).rows[0].c);
     if (branchCount === 0) {
-      await client.query("INSERT INTO branches(name,address) VALUES('Основной филиал','')");
+      await client.query("INSERT INTO branches(name,address) VALUES('In coffee','')");
     }
     const firstBranch = (await client.query('SELECT id FROM branches ORDER BY id LIMIT 1')).rows[0].id;
 
@@ -278,7 +577,7 @@ async function initDb() {
 app.get('/health', async (req, res) => {
   try {
     await pool.query('SELECT 1');
-    res.json({ ok: true, service: 'coffee-system-v7', database: 'ok' });
+    res.json({ ok: true, service: 'in-coffee-v10', database: 'ok' });
   } catch (e) {
     res.status(503).json({ ok: false, database: 'error' });
   }
@@ -382,11 +681,11 @@ app.post('/api/users/:id/reset-password', auth, allow('owner'), async (req, res)
 });
 
 app.get('/api/products', auth, async (req, res) => {
-  res.json((await pool.query('SELECT id,name,category,price,active FROM products WHERE active=true ORDER BY category,name')).rows);
+  res.json((await pool.query(`SELECT ${productSelect()} FROM products WHERE active=true ORDER BY category,name`)).rows);
 });
 
 app.get('/api/products/all', auth, allow('owner','admin'), async (req, res) => {
-  res.json((await pool.query('SELECT id,name,category,price,active FROM products ORDER BY active DESC,category,name')).rows);
+  res.json((await pool.query(`SELECT ${productSelect()} FROM products ORDER BY active DESC,category,name`)).rows);
 });
 
 app.post('/api/products', auth, allow('owner','admin'), async (req, res) => {
@@ -403,6 +702,32 @@ app.put('/api/products/:id', auth, allow('owner','admin'), async (req,res)=>{
   if(!rows[0]) return res.status(404).json({error:'Товар не найден'});
   res.json({ok:true,product:rows[0]});
 });
+
+app.get('/media/products/:id', async (req,res)=>{
+  const id=Number(req.params.id);
+  const {rows}=await pool.query('SELECT image_mime,image_data FROM products WHERE id=$1',[id]);
+  const p=rows[0];
+  if(!p || !p.image_data) return res.status(404).end();
+  res.setHeader('Content-Type',p.image_mime||'image/jpeg');
+  res.setHeader('Cache-Control','no-store');
+  res.send(p.image_data);
+});
+
+app.post('/api/products/:id/image', auth, allow('owner','admin'), imageUpload.single('image'), async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!req.file) return res.status(400).json({error:'Выберите JPG, PNG или WebP фото'});
+  const {rows}=await pool.query('UPDATE products SET image_mime=$1,image_data=$2 WHERE id=$3 RETURNING id',[req.file.mimetype,req.file.buffer,id]);
+  if(!rows[0]) return res.status(404).json({error:'Товар не найден'});
+  res.json({ok:true,imageUrl:`/media/products/${id}?v=${Date.now()}`});
+});
+
+app.delete('/api/products/:id/image', auth, allow('owner','admin'), async (req,res)=>{
+  const id=Number(req.params.id);
+  const result=await pool.query('UPDATE products SET image_mime=NULL,image_data=NULL WHERE id=$1',[id]);
+  if(!result.rowCount) return res.status(404).json({error:'Товар не найден'});
+  res.json({ok:true});
+});
+
 
 app.get('/api/warehouse', auth, allow('owner','admin'), async (req,res)=>{
   const branchId=await resolveBranch(req);
@@ -585,6 +910,7 @@ app.get('/api/reports', auth, allow('owner','admin'), async (req,res)=>{
     COALESCE(SUM(total),0)::bigint AS sales,
     COALESCE(SUM(CASE WHEN method='cash' THEN total ELSE 0 END),0)::bigint AS cash_sales,
     COALESCE(SUM(CASE WHEN method='card' THEN total ELSE 0 END),0)::bigint AS card_sales,
+    COALESCE(SUM(CASE WHEN method='online' THEN total ELSE 0 END),0)::bigint AS online_sales,
     COUNT(*)::int AS receipts,
     COALESCE(AVG(total),0)::bigint AS average_check
     FROM sales WHERE branch_id=$1 AND created_at>=${fromSql}`,[branchId])).rows[0];
@@ -625,7 +951,7 @@ app.get('/api/expenses', auth, allow('owner','admin'), async (req,res)=>{
 
 app.get('/api/orders', auth, async (req,res)=>{
   const branchId=await resolveBranch(req);
-  const {rows}=await pool.query('SELECT id,customer_name,customer_phone,status,total,created_at FROM online_orders WHERE branch_id=$1 ORDER BY created_at DESC LIMIT 100',[branchId]);
+  const {rows}=await pool.query('SELECT id,customer_name,customer_phone,status,total,payment_method,payment_status,paid_at,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at FROM online_orders WHERE branch_id=$1 ORDER BY created_at DESC LIMIT 100',[branchId]);
   res.json(rows);
 });
 
@@ -645,12 +971,15 @@ app.put('/api/orders/:id/status', auth, async (req,res)=>{
   if(status==='completed'){
     if(order.status==='completed') return res.json({ok:true,alreadyCompleted:true});
     if(order.status==='cancelled') return res.status(400).json({error:'Отменённый заказ нельзя завершить'});
-    const method=String(req.body.paymentMethod||'');
-    if(!['cash','card'].includes(method)) return res.status(400).json({error:'Выберите способ оплаты'});
+    let method=String(req.body.paymentMethod||'');
+    if(order.payment_method==='payme'){
+      if(order.payment_status!=='paid') return res.status(400).json({error:'Онлайн-оплата ещё не подтверждена'});
+      method='online';
+    }else if(!['cash','card'].includes(method)) return res.status(400).json({error:'Выберите способ оплаты'});
     const orderItems=(await pool.query('SELECT product_id AS "productId",name_snapshot AS name,price,quantity FROM online_order_items WHERE order_id=$1',[id])).rows;
     try{
       const sale=await createSale({branchId,userId:req.user.id,method,items:[],fixedItems:orderItems,source:`online_order:${id}`});
-      await pool.query("UPDATE online_orders SET status='completed' WHERE id=$1 AND branch_id=$2",[id,branchId]);
+      await pool.query("UPDATE online_orders SET status='completed',payment_status='paid',paid_at=COALESCE(paid_at,NOW()),payment_method=CASE WHEN payment_method='payme' THEN payment_method ELSE $3 END WHERE id=$1 AND branch_id=$2",[id,branchId,method]);
       return res.json({ok:true,sale});
     }catch(e){return res.status(e.status||500).json({error:e.message||'Не удалось завершить заказ'});}
   }
@@ -661,15 +990,163 @@ app.put('/api/orders/:id/status', auth, async (req,res)=>{
 
 app.get('/api/customer-qr', auth, allow('owner','admin'), async (req,res)=>{
   const branchId=await resolveBranch(req);
-  const origin=PUBLIC_URL || `${req.protocol}://${req.get('host')}`;
-  const url=`${origin}/menu.html?branch=${branchId}`;
-  const dataUrl=await QRCode.toDataURL(url,{width:360,margin:2});
-  res.json({url,dataUrl});
+  const url=`${originFor(req)}/menu.html?branch=${branchId}`;
+  const dataUrl=await QRCode.toDataURL(url,{width:900,margin:4,errorCorrectionLevel:'H'});
+  res.json({url,dataUrl,pngUrl:'/api/customer-qr/download?format=png',svgUrl:'/api/customer-qr/download?format=svg'});
 });
 
-app.get('/api/public/branches', async (req,res)=>{
+app.get('/api/customer-qr/download', auth, allow('owner','admin'), async (req,res)=>{
+  const branchId=await resolveBranch(req);
+  const url=`${originFor(req)}/menu.html?branch=${branchId}`;
+  const format=String(req.query.format||'png').toLowerCase();
+  if(format==='svg'){
+    const svg=await QRCode.toString(url,{type:'svg',margin:4,errorCorrectionLevel:'H'});
+    res.setHeader('Content-Type','image/svg+xml; charset=utf-8');
+    res.setHeader('Content-Disposition',`attachment; filename="in-coffee-qr-${branchId}.svg"`);
+    return res.send(svg);
+  }
+  const png=await QRCode.toBuffer(url,{type:'png',width:1800,margin:4,errorCorrectionLevel:'H'});
+  res.setHeader('Content-Type','image/png');
+  res.setHeader('Content-Disposition',`attachment; filename="in-coffee-qr-${branchId}-1800.png"`);
+  res.send(png);
+});
+
+
+app.post('/api/customer/register/start', smsLimiter, async (req,res)=>{
+  const name=String(req.body.name||'').trim().slice(0,80);
+  const phone=normalizeCustomerPhone(req.body.phone);
+  const password=String(req.body.password||'');
+  if(!name) return res.status(400).json({error:'Введите имя'});
+  if(!phone) return res.status(400).json({error:'Введите номер Узбекистана в формате +998 XX XXX XX XX'});
+  if(password.length<8) return res.status(400).json({error:'Пароль должен быть не короче 8 символов'});
+  const exists=(await pool.query('SELECT id FROM customer_accounts WHERE phone=$1',[phone])).rows[0];
+  if(exists) return res.status(400).json({error:'Аккаунт с таким номером уже существует. Выполните вход.'});
+  try{
+    const result=await createAndSendOtp({phone,purpose:'register',payload:{name,passwordHash:hashPassword(password)}});
+    res.json({...result,phoneMasked:phone.replace(/(\+998\d{2})\d{5}(\d{2})/,'$1*****$2')});
+  }catch(e){res.status(e.status||502).json({error:e.message||'Не удалось отправить SMS'})}
+});
+
+app.post('/api/customer/register/verify', loginLimiter, async (req,res)=>{
+  const phone=normalizeCustomerPhone(req.body.phone);
+  const code=String(req.body.code||'').replace(/\D/g,'').slice(0,6);
+  if(!phone||code.length!==6) return res.status(400).json({error:'Введите 6-значный SMS-код'});
+  const check=await verifyOtp(phone,'register',code);
+  if(!check.ok) return res.status(check.status).json({error:check.error});
+  const payload=check.record.payload||{};
+  const name=String(payload.name||'').trim().slice(0,80);
+  const passwordHash=String(payload.passwordHash||'');
+  if(!name||!passwordHash) return res.status(400).json({error:'Данные регистрации истекли. Начните регистрацию заново.'});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const {rows}=await client.query('INSERT INTO customer_accounts(name,phone,password_hash,phone_verified) VALUES($1,$2,$3,true) RETURNING id,name,phone,phone_verified,created_at',[name,phone,passwordHash]);
+    await client.query('DELETE FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2',[phone,'register']);
+    await client.query('COMMIT');
+    const customer=rows[0];
+    setCustomerCookie(res,signCustomer(customer));
+    res.json({ok:true,customer});
+  }catch(e){
+    await client.query('ROLLBACK');
+    if(e.code==='23505') return res.status(400).json({error:'Аккаунт с таким номером уже существует'});
+    throw e;
+  }finally{client.release()}
+});
+
+app.post('/api/customer/login', loginLimiter, async (req,res)=>{
+  const phone=normalizeCustomerPhone(req.body.phone);
+  const password=String(req.body.password||'');
+  if(!phone) return res.status(400).json({error:'Введите номер телефона'});
+  const {rows}=await pool.query('SELECT id,name,phone,password_hash,phone_verified,active,created_at FROM customer_accounts WHERE phone=$1',[phone]);
+  const customer=rows[0];
+  if(!customer||!customer.active||!verifyPassword(password,customer.password_hash)) return res.status(401).json({error:'Неверный номер телефона или пароль'});
+  setCustomerCookie(res,signCustomer(customer));
+  res.json({ok:true,customer:{id:customer.id,name:customer.name,phone:customer.phone,phone_verified:customer.phone_verified,created_at:customer.created_at}});
+});
+
+app.post('/api/customer/verification/send', customerAuth, smsLimiter, async (req,res)=>{
+  if(req.customer.phone_verified) return res.json({ok:true,alreadyVerified:true});
+  try{
+    const result=await createAndSendOtp({phone:req.customer.phone,purpose:'verify_existing',payload:{customerId:req.customer.id}});
+    res.json({...result,phoneMasked:req.customer.phone.replace(/(\+998\d{2})\d{5}(\d{2})/,'$1*****$2')});
+  }catch(e){res.status(e.status||502).json({error:e.message||'Не удалось отправить SMS'})}
+});
+
+app.post('/api/customer/verification/verify', customerAuth, loginLimiter, async (req,res)=>{
+  if(req.customer.phone_verified) return res.json({ok:true,customer:req.customer});
+  const code=String(req.body.code||'').replace(/\D/g,'').slice(0,6);
+  if(code.length!==6) return res.status(400).json({error:'Введите 6-значный SMS-код'});
+  const check=await verifyOtp(req.customer.phone,'verify_existing',code);
+  if(!check.ok) return res.status(check.status).json({error:check.error});
+  const {rows}=await pool.query('UPDATE customer_accounts SET phone_verified=true,updated_at=NOW() WHERE id=$1 RETURNING id,name,phone,phone_verified,active,created_at',[req.customer.id]);
+  await pool.query('DELETE FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2',[req.customer.phone,'verify_existing']);
+  res.json({ok:true,customer:rows[0]});
+});
+
+app.post('/api/customer/logout',(req,res)=>{clearCustomerCookie(res);res.json({ok:true})});
+
+app.get('/api/customer/me',customerAuth,async(req,res)=>{
+  res.json({customer:req.customer});
+});
+
+app.put('/api/customer/me',customerAuth,async(req,res)=>{
+  const name=String(req.body.name||'').trim().slice(0,80);
+  if(!name) return res.status(400).json({error:'Введите имя'});
+  const {rows}=await pool.query('UPDATE customer_accounts SET name=$1,updated_at=NOW() WHERE id=$2 RETURNING id,name,phone,phone_verified,created_at',[name,req.customer.id]);
+  res.json({ok:true,customer:rows[0]});
+});
+
+app.post('/api/customer/password',customerAuth,async(req,res)=>{
+  const current=String(req.body.currentPassword||''), next=String(req.body.newPassword||'');
+  if(next.length<8) return res.status(400).json({error:'Новый пароль должен быть не короче 8 символов'});
+  const {rows}=await pool.query('SELECT password_hash FROM customer_accounts WHERE id=$1',[req.customer.id]);
+  if(!verifyPassword(current,rows[0]?.password_hash)) return res.status(400).json({error:'Текущий пароль неверный'});
+  await pool.query('UPDATE customer_accounts SET password_hash=$1,updated_at=NOW() WHERE id=$2',[hashPassword(next),req.customer.id]);
+  res.json({ok:true});
+});
+
+app.get('/api/customer/orders',customerAuth,async(req,res)=>{
+  const {rows:orders}=await pool.query(`SELECT o.id,o.branch_id,b.name AS branch_name,o.status,o.total,o.payment_method,o.payment_status,o.paid_at,o.delivery_type,o.delivery_address,o.delivery_comment,o.created_at
+    FROM online_orders o LEFT JOIN branches b ON b.id=o.branch_id WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 100`,[req.customer.id]);
+  if(!orders.length) return res.json([]);
+  const ids=orders.map(o=>Number(o.id));
+  const {rows:items}=await pool.query('SELECT order_id,name_snapshot,price,quantity FROM online_order_items WHERE order_id=ANY($1::bigint[]) ORDER BY id',[ids]);
+  const grouped=new Map();
+  for(const item of items){const key=Number(item.order_id);if(!grouped.has(key))grouped.set(key,[]);grouped.get(key).push(item)}
+  res.json(orders.map(o=>({...o,items:grouped.get(Number(o.id))||[]})));
+});
+
+app.get('/api/customers',auth,allow('owner','admin'),async(req,res)=>{
+  const {rows}=await pool.query(`SELECT c.id,c.name,c.phone,c.phone_verified,c.active,c.created_at,COUNT(o.id)::int AS orders_count,COALESCE(SUM(CASE WHEN o.payment_status='paid' THEN o.total ELSE 0 END),0)::bigint AS paid_total
+    FROM customer_accounts c LEFT JOIN online_orders o ON o.customer_id=c.id GROUP BY c.id ORDER BY c.created_at DESC LIMIT 500`);
+  res.json(rows);
+});
+
+app.get('/api/payment-settings', auth, async (req,res)=>{
+  res.json({
+    provider:'Payme',
+    configured:paymeConfigured(),
+    mode:PAYME_TEST_MODE?'test':'production',
+    merchantApiEndpoint:`${originFor(req)}/api/payme`,
+    accountField:PAYME_ACCOUNT_FIELD
+  });
+});
+
+app.get('/api/public/sms-config', async (req,res)=>{
+  res.json({provider:'Eskiz',enabled:smsConfigured(),otpTtlMinutes:OTP_TTL_MINUTES});
+});
+
+app.get('/api/public/payment-config', async (req,res)=>{
+  res.json({provider:'Payme',enabled:paymeConfigured(),mode:PAYME_TEST_MODE?'test':'production'});
+});
+
+app.get('/api/public/branches' , async (req,res)=>{
   const {rows}=await pool.query('SELECT id,name,address FROM branches WHERE active=true ORDER BY id');
   res.json(rows);
+});
+
+app.get('/api/public/maps-config', async (req,res)=>{
+  res.json({provider:'Yandex Maps',enabled:Boolean(YANDEX_MAPS_API_KEY),apiKey:YANDEX_MAPS_API_KEY});
 });
 
 app.get('/api/public/products', async (req,res)=>{
@@ -678,12 +1155,26 @@ app.get('/api/public/products', async (req,res)=>{
     const ok=(await pool.query('SELECT id FROM branches WHERE id=$1 AND active=true',[branchId])).rows[0];
     if(!ok) return res.status(404).json({error:'Филиал не найден'});
   }
-  res.json((await pool.query('SELECT id,name,category,price FROM products WHERE active=true ORDER BY category,name')).rows);
+  res.json((await pool.query(`SELECT ${productSelect()} FROM products WHERE active=true ORDER BY category,name`)).rows);
 });
 
-app.post('/api/public/orders', orderLimiter, async (req,res)=>{
-  const branchId=Number(req.body.branchId), customerName=String(req.body.customerName||'').trim().slice(0,80), customerPhone=String(req.body.customerPhone||'').trim().slice(0,40), items=Array.isArray(req.body.items)?req.body.items:[];
-  if(!branchId || !customerName || !customerPhone || !items.length) return res.status(400).json({error:'Заполните имя, телефон и выберите товары'});
+app.post('/api/public/orders', customerAuth, orderLimiter, async (req,res)=>{
+  if(!req.customer.phone_verified) return res.status(403).json({error:'Подтвердите номер телефона по SMS перед заказом'});
+  const branchId=Number(req.body.branchId), customerName=req.customer.name, customerPhone=req.customer.phone, items=Array.isArray(req.body.items)?req.body.items:[];
+  const deliveryType=String(req.body.deliveryType||'pickup');
+  const deliveryAddress=String(req.body.deliveryAddress||'').trim().slice(0,220);
+  const deliveryComment=String(req.body.deliveryComment||'').trim().slice(0,300);
+  const hasLat=req.body.deliveryLat!==null&&req.body.deliveryLat!==undefined&&req.body.deliveryLat!=='';
+  const hasLng=req.body.deliveryLng!==null&&req.body.deliveryLng!==undefined&&req.body.deliveryLng!=='';
+  const rawLat=hasLat?Number(req.body.deliveryLat):NaN, rawLng=hasLng?Number(req.body.deliveryLng):NaN;
+  const deliveryLat=Number.isFinite(rawLat)&&rawLat>=-90&&rawLat<=90?rawLat:null;
+  const deliveryLng=Number.isFinite(rawLng)&&rawLng>=-180&&rawLng<=180?rawLng:null;
+  const paymentMethod=String(req.body.paymentMethod||'cash');
+  if(!['cash','payme'].includes(paymentMethod)) return res.status(400).json({error:'Некорректный способ оплаты'});
+  if(!['pickup','delivery'].includes(deliveryType)) return res.status(400).json({error:'Некорректный способ получения'});
+  if(deliveryType==='delivery' && !deliveryAddress) return res.status(400).json({error:'Укажите адрес доставки'});
+  if(paymentMethod==='payme' && !paymeConfigured()) return res.status(400).json({error:'Онлайн-оплата Payme пока не подключена'});
+  if(!branchId || !items.length) return res.status(400).json({error:'Выберите филиал и товары'});
   const branch=(await pool.query('SELECT id FROM branches WHERE id=$1 AND active=true',[branchId])).rows[0];
   if(!branch) return res.status(400).json({error:'Филиал недоступен'});
   const ids=items.map(x=>Number(x.productId)).filter(Boolean);
@@ -698,20 +1189,129 @@ app.post('/api/public/orders', orderLimiter, async (req,res)=>{
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
-    const order=(await client.query('INSERT INTO online_orders(branch_id,customer_name,customer_phone,total) VALUES($1,$2,$3,$4) RETURNING id,total,status,created_at',[branchId,customerName,customerPhone,total])).rows[0];
+    const paymentStatus=paymentMethod==='payme'?'pending':'unpaid';
+    const order=(await client.query('INSERT INTO online_orders(branch_id,customer_id,customer_name,customer_phone,total,payment_method,payment_status,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id,total,status,payment_method,payment_status,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at',[branchId,req.customer.id,customerName,customerPhone,total,paymentMethod,paymentStatus,deliveryType,deliveryType==='delivery'?deliveryAddress:'',deliveryType==='delivery'?deliveryLat:null,deliveryType==='delivery'?deliveryLng:null,deliveryType==='delivery'?deliveryComment:''])).rows[0];
     for(const item of normalized) await client.query('INSERT INTO online_order_items(order_id,product_id,name_snapshot,price,quantity) VALUES($1,$2,$3,$4,$5)',[order.id,item.p.id,item.p.name,item.p.price,item.quantity]);
     await client.query('COMMIT');
-    res.json({ok:true,order});
+    const paymentUrl=paymentMethod==='payme'?paymeCheckoutUrl(order.id,total,branchId,req):null;
+    res.json({ok:true,order,paymentUrl});
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
 });
 
-app.get('/api/export', auth, allow('owner','admin'), async (req,res)=>{
+app.get('/api/public/order-payment/:id', customerAuth, orderLimiter, async (req,res)=>{
+  const id=Number(req.params.id);
+  const {rows}=await pool.query('SELECT id,payment_method,payment_status,status,total FROM online_orders WHERE id=$1 AND customer_id=$2',[id,req.customer.id]);
+  const o=rows[0];
+  if(!o) return res.status(404).json({error:'Заказ не найден'});
+  res.json(o);
+});
+
+app.post('/api/payme', async (req,res)=>{
+  const rpcId=req.body?.id ?? null;
+  if(!paymeConfigured()) return res.json(paymeRpcError(rpcId,-32504,'Payme не настроен'));
+  const authData=parseBasicAuth(req), expectedSecret=paymeSecret();
+  if(!authData || authData.login!==PAYME_LOGIN || authData.password!==expectedSecret){
+    return res.json(paymeRpcError(rpcId,-32504,'Недостаточно привилегий'));
+  }
+  const method=String(req.body?.method||'');
+  const params=req.body?.params||{};
+  const account=params.account||{};
+  const orderId=Number(account[PAYME_ACCOUNT_FIELD]||0);
+  const now=Date.now();
+  const orderError=(code,ru,data)=>res.json(paymeRpcError(rpcId,code,ru,data));
+  const getOrder=async id=>(await pool.query('SELECT * FROM online_orders WHERE id=$1',[id])).rows[0];
+  const validateOrder=async()=>{
+    const order=await getOrder(orderId);
+    if(!order || order.payment_method!=='payme') return {error:[-31050,'Заказ не найден',PAYME_ACCOUNT_FIELD]};
+    if(Math.round(Number(params.amount||0))!==Math.round(Number(order.total)*100)) return {error:[-31001,'Неверная сумма']};
+    if(order.status==='cancelled') return {error:[-31008,'Заказ отменён']};
+    return {order};
+  };
+  try{
+    if(method==='CheckPerformTransaction'){
+      const v=await validateOrder(); if(v.error)return orderError(...v.error);
+      if(v.order.payment_status==='paid')return orderError(-31008,'Заказ уже оплачен');
+      return res.json(paymeRpcResult(rpcId,{allow:true}));
+    }
+    if(method==='CreateTransaction'){
+      const paymeId=String(params.id||'');
+      if(!paymeId || !Number.isFinite(Number(params.time))) return orderError(-32600,'Некорректный запрос');
+      const existing=(await pool.query('SELECT * FROM payme_transactions WHERE payme_id=$1',[paymeId])).rows[0];
+      if(existing){
+        if(existing.state===1 && now-Number(existing.time_ms)>43200000){
+          await pool.query('UPDATE payme_transactions SET state=-1,reason=4,cancel_time_ms=$1 WHERE payme_id=$2',[now,paymeId]);
+          await pool.query("UPDATE online_orders SET payment_status='cancelled' WHERE id=$1 AND payment_status<>'paid'",[existing.order_id]);
+          return orderError(-31008,'Транзакция отменена по таймауту');
+        }
+        return res.json(paymeRpcResult(rpcId,{create_time:Number(existing.create_time_ms),transaction:String(existing.order_id),state:Number(existing.state)}));
+      }
+      const v=await validateOrder(); if(v.error)return orderError(...v.error);
+      const other=(await pool.query('SELECT payme_id,state FROM payme_transactions WHERE order_id=$1 AND state IN (1,2) LIMIT 1',[orderId])).rows[0];
+      if(other) return orderError(-31008,'Для заказа уже существует транзакция');
+      const createTime=now;
+      await pool.query('INSERT INTO payme_transactions(payme_id,order_id,time_ms,amount_tiyin,create_time_ms,state) VALUES($1,$2,$3,$4,$5,1)',[paymeId,orderId,Number(params.time),Number(params.amount),createTime]);
+      await pool.query("UPDATE online_orders SET payment_status='pending' WHERE id=$1",[orderId]);
+      return res.json(paymeRpcResult(rpcId,{create_time:createTime,transaction:String(orderId),state:1}));
+    }
+    if(method==='PerformTransaction'){
+      const paymeId=String(params.id||'');
+      const tx=(await pool.query('SELECT * FROM payme_transactions WHERE payme_id=$1',[paymeId])).rows[0];
+      if(!tx)return orderError(-31003,'Транзакция не найдена');
+      if(tx.state===2)return res.json(paymeRpcResult(rpcId,{transaction:String(tx.order_id),perform_time:Number(tx.perform_time_ms),state:2}));
+      if(tx.state!==1)return orderError(-31008,'Невозможно выполнить операцию');
+      if(now-Number(tx.time_ms)>43200000){
+        await pool.query('UPDATE payme_transactions SET state=-1,reason=4,cancel_time_ms=$1 WHERE payme_id=$2',[now,paymeId]);
+        await pool.query("UPDATE online_orders SET payment_status='cancelled' WHERE id=$1",[tx.order_id]);
+        return orderError(-31008,'Транзакция отменена по таймауту');
+      }
+      await pool.query('UPDATE payme_transactions SET state=2,perform_time_ms=$1 WHERE payme_id=$2',[now,paymeId]);
+      await pool.query("UPDATE online_orders SET payment_status='paid',paid_at=NOW() WHERE id=$1",[tx.order_id]);
+      return res.json(paymeRpcResult(rpcId,{transaction:String(tx.order_id),perform_time:now,state:2}));
+    }
+    if(method==='CancelTransaction'){
+      const paymeId=String(params.id||'');
+      const tx=(await pool.query('SELECT * FROM payme_transactions WHERE payme_id=$1',[paymeId])).rows[0];
+      if(!tx)return orderError(-31003,'Транзакция не найдена');
+      const order=await getOrder(tx.order_id);
+      if(order?.status==='completed')return orderError(-31007,'Заказ уже выдан');
+      if(tx.state<0)return res.json(paymeRpcResult(rpcId,{transaction:String(tx.order_id),cancel_time:Number(tx.cancel_time_ms),state:Number(tx.state)}));
+      const state=tx.state===2?-2:-1, reason=Number(params.reason||10);
+      await pool.query('UPDATE payme_transactions SET state=$1,reason=$2,cancel_time_ms=$3 WHERE payme_id=$4',[state,reason,now,paymeId]);
+      await pool.query("UPDATE online_orders SET payment_status='cancelled',paid_at=NULL WHERE id=$1",[tx.order_id]);
+      return res.json(paymeRpcResult(rpcId,{transaction:String(tx.order_id),cancel_time:now,state}));
+    }
+    if(method==='CheckTransaction'){
+      const tx=(await pool.query('SELECT * FROM payme_transactions WHERE payme_id=$1',[String(params.id||'')])).rows[0];
+      if(!tx)return orderError(-31003,'Транзакция не найдена');
+      return res.json(paymeRpcResult(rpcId,{create_time:Number(tx.create_time_ms),perform_time:Number(tx.perform_time_ms),cancel_time:Number(tx.cancel_time_ms),transaction:String(tx.order_id),state:Number(tx.state),reason:tx.reason===null?null:Number(tx.reason)}));
+    }
+    if(method==='GetStatement'){
+      const from=Number(params.from||0),to=Number(params.to||0);
+      const {rows}=await pool.query('SELECT * FROM payme_transactions WHERE time_ms BETWEEN $1 AND $2 ORDER BY time_ms',[from,to]);
+      return res.json(paymeRpcResult(rpcId,{transactions:rows.map(tx=>({id:tx.payme_id,time:Number(tx.time_ms),amount:Number(tx.amount_tiyin),account:{[PAYME_ACCOUNT_FIELD]:String(tx.order_id)},create_time:Number(tx.create_time_ms),perform_time:Number(tx.perform_time_ms),cancel_time:Number(tx.cancel_time_ms),transaction:String(tx.order_id),state:Number(tx.state),reason:tx.reason===null?null:Number(tx.reason)}))}));
+    }
+    if(method==='SetFiscalData'){
+      const paymeId=String(params.id||'');
+      const tx=(await pool.query('SELECT payme_id FROM payme_transactions WHERE payme_id=$1',[paymeId])).rows[0];
+      if(!tx)return res.json({error:{code:-32001,message:'Чек с таким id не найден'},id:rpcId});
+      if(String(params.type||'')==='CANCEL') await pool.query('UPDATE payme_transactions SET fiscal_cancel=$1 WHERE payme_id=$2',[params.fiscal_data||{},paymeId]);
+      else await pool.query('UPDATE payme_transactions SET fiscal_perform=$1 WHERE payme_id=$2',[params.fiscal_data||{},paymeId]);
+      return res.json(paymeRpcResult(rpcId,{success:true}));
+    }
+    return res.json(paymeRpcError(rpcId,-32601,'Метод не найден',method));
+  }catch(e){
+    console.error('Payme error',e);
+    return res.json(paymeRpcError(rpcId,-32400,'Системная ошибка'));
+  }
+});
+
+app.get('/api/export' , auth, allow('owner','admin'), async (req,res)=>{
   const branchId=req.user.role==='owner' ? null : await resolveBranch(req);
-  const data={exportedAt:new Date().toISOString(),version:'7.0.0'};
+  const data={exportedAt:new Date().toISOString(),version:'10.0.0',brand:'In coffee'};
   if(branchId){
     data.branches=(await pool.query('SELECT id,name,address,active,created_at FROM branches WHERE id=$1',[branchId])).rows;
     data.users=(await pool.query('SELECT id,username,name,role,branch_id,active,created_at FROM users WHERE branch_id=$1',[branchId])).rows;
-    data.products=(await pool.query('SELECT * FROM products ORDER BY id')).rows;
+    data.products=(await pool.query("SELECT id,name,category,price,active,image_mime,(image_data IS NOT NULL) AS has_image,created_at FROM products ORDER BY id")).rows;
     data.inventory=(await pool.query('SELECT * FROM inventory_items WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
     data.recipes=(await pool.query('SELECT * FROM recipes WHERE branch_id=$1 ORDER BY product_id,inventory_item_id',[branchId])).rows;
     data.sales=(await pool.query('SELECT * FROM sales WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
@@ -720,10 +1320,11 @@ app.get('/api/export', auth, allow('owner','admin'), async (req,res)=>{
     data.onlineOrders=(await pool.query('SELECT * FROM online_orders WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
     data.onlineOrderItems=(await pool.query('SELECT oi.* FROM online_order_items oi JOIN online_orders o ON o.id=oi.order_id WHERE o.branch_id=$1 ORDER BY oi.id',[branchId])).rows;
     data.inventoryMovements=(await pool.query('SELECT * FROM inventory_movements WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
+    data.customerAccounts=(await pool.query('SELECT id,name,phone,active,created_at,updated_at FROM customer_accounts ORDER BY id')).rows;
   }else{
     data.branches=(await pool.query('SELECT * FROM branches ORDER BY id')).rows;
     data.users=(await pool.query('SELECT id,username,name,role,branch_id,active,created_at FROM users ORDER BY id')).rows;
-    data.products=(await pool.query('SELECT * FROM products ORDER BY id')).rows;
+    data.products=(await pool.query("SELECT id,name,category,price,active,image_mime,(image_data IS NOT NULL) AS has_image,created_at FROM products ORDER BY id")).rows;
     data.inventory=(await pool.query('SELECT * FROM inventory_items ORDER BY id')).rows;
     data.recipes=(await pool.query('SELECT * FROM recipes ORDER BY branch_id,product_id,inventory_item_id')).rows;
     data.sales=(await pool.query('SELECT * FROM sales ORDER BY id')).rows;
@@ -732,21 +1333,23 @@ app.get('/api/export', auth, allow('owner','admin'), async (req,res)=>{
     data.onlineOrders=(await pool.query('SELECT * FROM online_orders ORDER BY id')).rows;
     data.onlineOrderItems=(await pool.query('SELECT * FROM online_order_items ORDER BY id')).rows;
     data.inventoryMovements=(await pool.query('SELECT * FROM inventory_movements ORDER BY id')).rows;
+    data.customerAccounts=(await pool.query('SELECT id,name,phone,active,created_at,updated_at FROM customer_accounts ORDER BY id')).rows;
   }
   const stamp=new Date().toISOString().slice(0,10);
   res.setHeader('Content-Type','application/json; charset=utf-8');
-  res.setHeader('Content-Disposition',`attachment; filename="coffee-export-${stamp}.json"`);
+  res.setHeader('Content-Disposition',`attachment; filename="in-coffee-export-${stamp}.json"`);
   res.send(JSON.stringify(data,null,2));
 });
 
 app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) return res.status(400).json({error: err.code==='LIMIT_FILE_SIZE'?'Фото слишком большое (максимум 3 МБ)':'Ошибка загрузки фото'});
   console.error(err);
   if (res.headersSent) return next(err);
   res.status(500).json({ error: 'Внутренняя ошибка сервера' });
 });
 
 initDb().then(() => {
-  app.listen(PORT, HOST, () => console.log(`Coffee System v7: http://${HOST}:${PORT}`));
+  app.listen(PORT, HOST, () => console.log(`In coffee v10: http://${HOST}:${PORT}`));
 }).catch(err => {
   console.error('Database init failed:', err);
   process.exit(1);

@@ -1,19 +1,13 @@
-COFFEE SYSTEM v7 — RENDER
+IN COFFEE v11 — SMS-ПОДТВЕРЖДЕНИЕ
 
-1. Создай PostgreSQL database в Render.
-2. Скопируй Internal Database URL.
-3. В Web Service -> Environment добавь:
-   DATABASE_URL = Internal Database URL
-   SESSION_SECRET = длинная случайная строка
-   ADMIN_USERNAME = admin
-   ADMIN_PASSWORD = придумай новый пароль минимум 8 символов
-   PUBLIC_URL = адрес твоего Web Service
-   NODE_ENV = production
-4. Загрузи файлы v7 в ту же Root Directory, из которой сейчас запускается сайт.
-5. Dockerfile Path должен оставаться ./Dockerfile.
-6. Запусти Deploy latest commit.
-7. В логах при успехе будет: Coffee System v7: http://0.0.0.0:PORT
-8. Открой сайт, войди владельцем и проверь разделы.
-9. QR-меню: раздел "QR и меню".
+1. Замените текущие файлы проекта файлами v11 и сделайте Commit changes.
+2. В Render -> Web Service -> Environment добавьте:
+   ESKIZ_EMAIL = email аккаунта Eskiz
+   ESKIZ_PASSWORD = пароль/API-секрет Eskiz
+   ESKIZ_FROM = 4546
+3. Save changes / Deploy latest commit.
+4. В Eskiz должен быть активный аккаунт и возможность отправки SMS.
+5. Старые клиенты v10 после первого входа увидят подтверждение номера по SMS.
+6. Номер в заказе всегда берётся из подтверждённого аккаунта.
 
-ВАЖНО: бесплатный Render Postgres подходит для теста, но бесплатная база Render имеет ограниченный срок жизни. Для постоянной реальной кофейни используй постоянную/платную базу и резервные копии.
+Остальные переменные (DATABASE_URL, SESSION_SECRET, ADMIN_PASSWORD, Payme, Yandex Maps) не меняйте.
