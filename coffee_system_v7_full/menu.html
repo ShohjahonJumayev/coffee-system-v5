@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#1c130f"><title>In coffee — меню</title><link rel="stylesheet" href="menu.css"></head>
+<body>
+<div id="luxLoader" class="lux-loader"><div class="loader-card"><div class="loader-ring"></div><div class="loader-logo">☕</div><h2>In coffee</h2><p>Подготавливаем премиальное меню и атмосферу для вашего заказа…</p></div></div>
+<div class="lux-bg">
+  <span class="bg-orb orb-1"></span>
+  <span class="bg-orb orb-2"></span>
+  <span class="bg-orb orb-3"></span>
+  <span class="bg-line line-1"></span>
+  <span class="bg-line line-2"></span>
+</div>
+<header class="menu-head"><div class="menu-logo">☕</div><div class="menu-brand"><h1>In coffee</h1><p id="branchName">Выберите напитки и отправьте заказ</p></div><button id="accountBtn" class="account-btn">Войти</button></header>
+<div id="businessStatus" class="business-status"><span class="status-dot"></span><div><b>Проверяем часы работы…</b><small>Онлайн-заказы: 08:00–01:00</small></div></div>
+<main class="menu-main">
+  <section class="lux-banner" id="promo">
+    <div>
+      <span class="gold-badge">PREMIUM</span>
+      <h2>Авторское меню In coffee</h2>
+      <p>Роскошный вкус, уютная атмосфера и онлайн-заказ за пару касаний.</p>
+      <div class="banner-actions"><a href="#productsSection">Смотреть меню</a><a href="#contactsSection" class="ghost-link">Контакты</a><a href="#teamSection" class="ghost-link">Команда</a></div>
+    </div>
+    <div class="lux-banner-side"><b>FIRST10</b><small>10% скидка на первый онлайн-заказ</small><span>Действует только для новых клиентов</span></div>
+  </section>
+  <section class="hero-slider" id="heroSlider">
+    <div class="slider-track" id="sliderTrack">
+      <article class="slide active">
+        <div class="slide-content">
+          <span class="gold-badge">АКЦИЯ</span>
+          <h3>FIRST10 — скидка 10%</h3>
+          <p>Для первого онлайн-заказа. Войди в аккаунт и активируй промокод в корзине.</p>
+        </div>
+      </article>
+      <article class="slide">
+        <div class="slide-content">
+          <span class="gold-badge">ДОСТАВКА</span>
+          <h3>Быстрый заказ с карты</h3>
+          <p>Укажи адрес, точку на Яндекс Карте и загрузи чек перевода — мы всё проверим.</p>
+        </div>
+      </article>
+      <article class="slide">
+        <div class="slide-content">
+          <span class="gold-badge">PREMIUM</span>
+          <h3>Роскошный вкус каждый день</h3>
+          <p>Авторские напитки, стильная подача и удобный личный кабинет клиента.</p>
+        </div>
+      </article>
+    </div>
+    <div class="slider-controls">
+      <button id="prevSlide" type="button">‹</button>
+      <div class="slider-dots" id="sliderDots"></div>
+      <button id="nextSlide" type="button">›</button>
+    </div>
+  </section>
+  <div class="branch-box reveal-up"><label>Филиал</label><select id="branchSelect"></select></div>
+  <section class="popular-section reveal-up" id="popularSection">
+    <div class="popular-head">
+      <div>
+        <span class="section-kicker">Популярное</span>
+        <h3>Хиты, которые заказывают чаще всего</h3>
+        <p>Подборка самых любимых напитков и десертов гостей In coffee.</p>
+      </div>
+      <a href="#productsSection">Открыть всё меню</a>
+    </div>
+    <div id="popularProducts" class="popular-grid"></div>
+  </section>
+  <section class="info-strip reveal-up">
+    <div><b>☕ 100% свежеобжаренный кофе</b><small>Собираем заказ сразу после оформления</small></div>
+    <div><b>🚗 Доставка по карте</b><small>Укажите точку в Яндекс Картах или введите адрес</small></div>
+    <div><b>💳 Оплата по чеку</b><small>Безопасное подтверждение через аккаунт клиента</small></div>
+  </section>
+  <div id="categories" class="chips reveal-up"></div>
+  <div id="productsSection" class="reveal-up"><div id="products" class="menu-grid"></div></div>
+  <section class="vip-story reveal-up">
+    <div class="story-card">
+      <span class="section-kicker">Почему выбирают нас</span>
+      <h3>Сервис, который ощущается как премиум-кофейня</h3>
+      <div class="story-grid">
+        <article><b>✨ Атмосфера</b><p>Тёплый интерьер, качественная подача и внимание к деталям.</p></article>
+        <article><b>🫘 Качество</b><p>Отбираем напитки и десерты так, чтобы клиент хотел вернуться снова.</p></article>
+        <article><b>⚡ Удобство</b><p>Заказ, доставка, история оплат и личный аккаунт в одном месте.</p></article>
+      </div>
+    </div>
+    <div class="story-card" id="aboutSection">
+      <span class="section-kicker">О нас</span>
+      <h3>In coffee — стиль, вкус и комфорт</h3>
+      <p>Мы сделали In coffee для тех, кто любит не просто кофе, а красивую подачу, приятную атмосферу и удобный онлайн-заказ. Здесь можно быстро оформить заказ, получить доставку и сохранить всю историю покупок в своём аккаунте.</p>
+      <ul class="about-list">
+        <li><b>⏰ Режим:</b> ежедневно с 08:00 до 01:00</li>
+        <li><b>📍 Доставка:</b> по адресу или точке на карте</li>
+        <li><b>🎁 Акция:</b> промокод FIRST10 на первый заказ</li>
+      </ul>
+    </div>
+  </section>
+  <section class="team-section reveal-up" id="teamSection">
+    <div class="team-head">
+      <span class="section-kicker">Наша команда</span>
+      <h3>Люди, которые создают атмосферу In coffee</h3>
+      <p>Собираем вкус, сервис и настроение в одном месте — от бариста до менеджера доставки.</p>
+    </div>
+    <div class="team-grid">
+      <article class="team-card"><div class="team-avatar">☕</div><b>Главный бариста</b><small>Автор напитков</small><p>Следит за вкусом, подачей и качеством каждой чашки.</p></article>
+      <article class="team-card"><div class="team-avatar">🛵</div><b>Менеджер доставки</b><small>Быстрая логистика</small><p>Контролирует доставку, адреса и аккуратную передачу заказов.</p></article>
+      <article class="team-card"><div class="team-avatar">✨</div><b>Сервис-менеджер</b><small>Забота о гостях</small><p>Помогает клиентам, проверяет заказы и делает сервис премиальным.</p></article>
+    </div>
+  </section>
+  <section class="contacts-section reveal-up" id="contactsSection">
+    <div class="contacts-copy">
+      <span class="section-kicker">Контакты</span>
+      <h3>Свяжитесь с In coffee</h3>
+      <p>Заказы, доставка, сотрудничество и вопросы по меню — мы всегда на связи.</p>
+      <div class="contact-list">
+        <div><b>📍 Адрес</b><span>Ваш филиал / адрес кофейни</span></div>
+        <div><b>📞 Телефон</b><span>+998 90 000 00 00</span></div>
+        <div><b>🕒 Режим работы</b><span>Ежедневно с 08:00 до 01:00</span></div>
+        <div><b>✈️ Telegram</b><span>@incoffee_support</span></div>
+      </div>
+    </div>
+    <div class="contacts-card">
+      <div class="contact-map">📍</div>
+      <h4>Мы рядом, когда хочется кофе</h4>
+      <p>Добавьте сюда свой точный адрес, Instagram, Telegram и номер для доставки. Блок уже готов для красивой презентации.</p>
+      <a href="#productsSection">Перейти к меню</a>
+    </div>
+  </section>
+  <section class="reviews-section reveal-up" id="reviewsSection">
+    <div class="reviews-head">
+      <span class="section-kicker">Отзывы гостей</span>
+      <h3>Что говорят клиенты о In coffee</h3>
+      <p>Немного атмосферы и впечатлений от наших гостей.</p>
+    </div>
+    <div class="reviews-grid">
+      <article class="review-card">
+        <div class="review-top"><b>Мухаммадали</b><span>★★★★★</span></div>
+        <p>Очень красивый сайт и удобный заказ. Кофе приехал быстро, всё аккуратно и вкусно.</p>
+      </article>
+      <article class="review-card">
+        <div class="review-top"><b>Шахноза</b><span>★★★★★</span></div>
+        <p>Нравится атмосфера In coffee. Промокод на первый заказ — очень приятный бонус.</p>
+      </article>
+      <article class="review-card">
+        <div class="review-top"><b>Азизбек</b><span>★★★★★</span></div>
+        <p>Удобно, что есть история заказов и личный кабинет. Всё выглядит дорого и современно.</p>
+      </article>
+    </div>
+  </section>
+</main>
+<div class="cart-bar"><div><small>Итого</small><b><span id="total">0</span> сум</b></div><button id="openCart">Корзина · <span id="count">0</span></button></div>
+
+<div id="drawer" class="drawer hide"><div class="drawer-card"><div class="drawer-head"><h2>Ваш заказ</h2><button id="closeCart">×</button></div><div id="cartList"></div><div class="totals-box"><div class="total-line"><span>Подытог</span><b><span id="drawerSubtotal">0</span> сум</b></div><div id="discountRow" class="total-line discount-line hide"><span>Скидка <span id="promoAppliedCode">FIRST10</span></span><b>−<span id="drawerDiscount">0</span> сум</b></div><div class="total-row final"><span>Итого</span><b><span id="drawerTotal">0</span> сум</b></div></div>
+<div id="checkoutAccount" class="checkout-account"></div>
+<div class="section-label">Промокод</div><div class="promo-box"><div class="promo-copy"><b>🎁 FIRST10</b><small>Скидка 10% на первый онлайн-заказ</small></div><div class="promo-row"><input id="promoCode" placeholder="Введите промокод"><button id="applyPromo" type="button">Применить</button></div><p id="promoStatus" class="promo-status">Войдите в аккаунт клиента, чтобы использовать промокод на первый заказ.</p></div><div class="section-label">Получение заказа</div>
+<div class="payment-box receive-box"><label class="payment-option delivery-only-option"><input type="radio" name="deliveryType" value="delivery" checked><span><b>🚗 Только доставка</b><small>Укажите адрес — самовывоз для онлайн-заказов отключён</small></span></label></div>
+<div id="deliveryBox" class="delivery-box"><input id="deliveryAddress" placeholder="Адрес доставки: улица, дом, квартира"><div class="map-actions"><button id="findAddress" type="button">🔎 Найти адрес</button><button id="myLocation" type="button">📍 Моё местоположение</button></div><div id="deliveryMap" class="delivery-map"><div id="mapPlaceholder" class="map-placeholder">Яндекс Карта загрузится здесь</div></div><input id="deliveryComment" placeholder="Комментарий курьеру: подъезд, этаж, ориентир"><small id="mapHint" class="map-hint">Укажите адрес или поставьте точку на карте.</small></div>
+<div class="section-label">Оплата</div><div class="payment-box"><label id="receiptOption" class="payment-option hide"><input type="radio" name="paymentMethod" value="receipt" checked><span><b>Перевод на карту</b><small>Единственный способ оплаты онлайн-заказа · загрузите чек</small></span></label></div><div id="receiptPaymentBox" class="delivery-box hide"><div class="receipt-pay-info"><b>💳 Карта для перевода</b><div id="transferCardNumber" class="transfer-card-number"></div><small id="transferCardHolder"></small></div><label class="file-input wide-file">📎 Загрузить чек оплаты<input id="paymentReceipt" type="file" accept="image/jpeg,image/png,image/webp"></label><small class="map-hint">Заказ будет принят после проверки чека администратором.</small></div><button id="sendOrder" class="send">Оформить заказ</button><p id="paymentNote" class="note">Для заказа нужен аккаунт клиента.</p></div></div>
+
+<div id="authModal" class="modal-layer hide"><div class="auth-card"><div class="drawer-head"><h2 id="authTitle">Вход</h2><button id="closeAuth">×</button></div>
+<div id="authFormStep"><div class="auth-tabs"><button id="loginTab" class="active">Вход</button><button id="registerTab">Регистрация</button></div><input id="authName" class="hide" placeholder="Ваше имя"><input id="authPhone" type="tel" inputmode="tel" placeholder="+998 90 123 45 67"><input id="authPassword" type="password" placeholder="Пароль, минимум 8 символов"><button id="authSubmit" class="send">Войти</button><p class="note">При регистрации номер подтверждается бесплатно через Telegram.</p></div>
+<div id="telegramStep" class="hide"><div class="telegram-icon">✈️</div><h3>Подтвердите номер через Telegram</h3><p id="telegramText" class="note">Откройте бота и нажмите «Поделиться моим номером».</p><a id="telegramOpen" class="send telegram-open" href="#" target="_blank" rel="noopener">Открыть Telegram</a><button id="telegramCheck" type="button" class="telegram-check">Проверить подтверждение</button><div class="telegram-actions"><button id="telegramRestart" type="button">Создать новую ссылку</button><button id="backAuth" type="button">Назад</button></div><p class="telegram-safe">🔒 Мы принимаем только номер, привязанный к вашему Telegram-аккаунту.</p></div>
+<p id="authError" class="auth-error"></p></div></div>
+
+<div id="profileModal" class="modal-layer hide"><div class="profile-card"><div class="drawer-head"><div><h2>Мой аккаунт</h2><small id="profilePhone"></small><div id="profileVerified" class="verify-badge"></div></div><button id="closeProfile">×</button></div><div class="profile-name"><input id="profileName" placeholder="Имя"><button id="saveProfile">Сохранить</button></div><div class="profile-actions"><button id="verifyPhone" class="verify-action hide">Подтвердить телефон</button><button id="changePassword">Сменить пароль</button><button id="logoutCustomer" class="danger">Выйти</button></div><h3>История заказов и платежей</h3><div id="historyList" class="history-list"></div></div></div>
+
+<div id="success" class="success-modal hide"><div><div class="big">✅</div><h2>Заказ отправлен!</h2><p id="successText"></p><button id="successDone">Готово</button></div></div>
+<script src="menu.js"></script></body></html>
