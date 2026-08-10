@@ -5,7 +5,7 @@ const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt
 const pack = o => encodeURIComponent(JSON.stringify(o)).replace(/'/g,'%27');
 const unpack = s => JSON.parse(decodeURIComponent(s));
 
-const state = { user:null, branches:[], branchId:null, products:[], cart:[], page:'dashboard', cashShift:null }; 
+const state = { user:null, branches:[], branchId:null, products:[], cart:[], page:'cash', cashShift:null }; 
 
 function toast(text, bad=false){
   const el=$('toast'); el.textContent=text; el.className='toast show'+(bad?' error-toast':'');
@@ -69,12 +69,12 @@ $('loginPassword').onkeydown=e=>{if(e.key==='Enter')login()};
 $('logoutBtn').onclick=async()=>{try{await api('/api/logout',{method:'POST'})}catch{} location.reload()};
 
 async function bootstrap(){
-  const d=await api('/api/me'); state.user=d.user;state.branches=d.branches;setupBranches();setRoleUi();showApp();go('dashboard');
+  const d=await api('/api/me'); state.user=d.user;state.branches=d.branches;setupBranches();setRoleUi();showApp();go('cash');
 }
 
-const titles={dashboard:['Главная','Обзор кофейни'],cash:['Касса','Продажи и оплата'],orders:['Онлайн-заказы','Заказы клиентов'],products:['Товары','Меню и цены'],warehouse:['Склад','Остатки'],recipes:['Рецепты','Автосписание'],reports:['Отчёты','Продажи и прибыль'],receipts:['Чеки','История продаж'],expenses:['Расходы','История расходов'],shifts:['История смен','Закрытые кассы и расходы'],customers:['Клиенты и QR','Регистрации, меню и карта'],users:['Сотрудники','Роли и доступ'],branches:['Филиалы','Управление точками'],settings:['Настройки','Безопасность']};
+const titles={cash:['Касса','Продажи и оплата'],orders:['Онлайн-заказы','Заказы клиентов'],products:['Товары','Меню и цены'],warehouse:['Склад','Остатки'],recipes:['Рецепты','Автосписание'],reports:['Отчёты','Продажи и прибыль'],receipts:['Чеки','История продаж'],expenses:['Расходы','История расходов'],shifts:['История смен','Закрытые кассы и расходы'],customers:['Клиенты и QR','Регистрации, меню и карта'],users:['Сотрудники','Роли и доступ'],branches:['Филиалы','Управление точками'],settings:['Настройки','Безопасность']};
 function go(page){
-  const btn=document.querySelector(`#nav button[data-page="${page}"]`); if(btn?.classList.contains('hide'))page='dashboard';
+  const btn=document.querySelector(`#nav button[data-page="${page}"]`); if(!btn || btn.classList.contains('hide'))page='cash';
   state.page=page; document.querySelectorAll('.page').forEach(p=>p.classList.add('hide')); $(`page-${page}`).classList.remove('hide');
   document.querySelectorAll('#nav button').forEach(b=>b.classList.toggle('active',b.dataset.page===page));
   $('topTitle').textContent=titles[page][0];$('topSubtitle').textContent=titles[page][1]; closeMenu(); loadPage(page);
@@ -88,7 +88,6 @@ $('menuBtn').onclick=()=>$('sidebar').classList.contains('open')?closeMenu():ope
 
 async function loadPage(page){
   try{
-    if(page==='dashboard')await dashboard();
     if(page==='cash')await Promise.all([loadProducts(),loadCashShift()]);
     if(page==='orders')await orders();
     if(page==='products')await productsAdmin();
@@ -110,10 +109,8 @@ function activityRow(o){
 }
 async function dashboard(){
   const d=await api('/api/dashboard');
-  $('dashCash').textContent=money(d.cash)+' сум';$('dashSales').textContent=money(d.sales)+' сум';$('dashExpenses').textContent=money(d.expenses)+' сум';$('dashLow').textContent=d.low_stock;
-  $('activityList').innerHTML=d.activity.length?d.activity.map(activityRow).join(''):'<div class="empty">Операций пока нет</div>';
-  $('ordersBadge').textContent=d.pending_orders;$('ordersBadge').classList.toggle('hide',!Number(d.pending_orders));
-  $('stockBadge').textContent=d.low_stock;$('stockBadge').classList.toggle('hide',!Number(d.low_stock));
+  if($('ordersBadge')){$('ordersBadge').textContent=d.pending_orders;$('ordersBadge').classList.toggle('hide',!Number(d.pending_orders));}
+  if($('stockBadge')){$('stockBadge').textContent=d.low_stock;$('stockBadge').classList.toggle('hide',!Number(d.low_stock));}
 }
 
 async function loadCashShift(){

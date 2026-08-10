@@ -27,11 +27,10 @@
   <aside id="sidebar" class="sidebar">
     <div class="brand">
       <div class="brand-icon">☕</div>
-      <div><b>In coffee</b><small>v14.1</small></div>
+      <div><b>In coffee</b><small>v14.3</small></div>
     </div>
     <nav id="nav" class="nav">
-      <button data-page="dashboard" data-roles="owner,admin,cashier" class="active">📊 <span>Главная</span></button>
-      <button data-page="cash" data-roles="owner,admin,cashier">🧾 <span>Касса</span></button>
+      <button data-page="cash" data-roles="owner,admin,cashier" class="active">🧾 <span>Касса</span></button>
       <button data-page="orders" data-roles="owner,admin,cashier">📱 <span>Онлайн-заказы</span><i id="ordersBadge" class="badge hide">0</i></button>
       <button data-page="products" data-roles="owner,admin">☕ <span>Товары</span></button>
       <button data-page="warehouse" data-roles="owner,admin">📦 <span>Склад</span><i id="stockBadge" class="badge warn hide">0</i></button>
@@ -55,39 +54,15 @@
     <header class="topbar">
       <button id="menuBtn" class="icon-btn mobile-only">☰</button>
       <div>
-        <b id="topTitle">Главная</b>
-        <small id="topSubtitle">Обзор кофейни</small>
+        <b id="topTitle">Касса</b>
+        <small id="topSubtitle">Продажи и оплата</small>
       </div>
       <div class="top-actions">
         <select id="branchSelect" class="select"></select>
       </div>
     </header>
 
-    <section id="page-dashboard" class="page">
-      <div class="hero">
-        <div><h1>Добро пожаловать 👋</h1><p class="muted">Продажи, касса и остатки в одном месте.</p></div>
-        <button class="btn primary" data-goto="cash">Открыть кассу</button>
-      </div>
-      <div class="stats four">
-        <div class="stat"><span>💰 В кассе</span><strong id="dashCash">0 сум</strong></div>
-        <div class="stat"><span>📈 Продажи</span><strong id="dashSales">0 сум</strong></div>
-        <div class="stat"><span>💸 Расходы</span><strong id="dashExpenses">0 сум</strong></div>
-        <div class="stat"><span>📦 Мало на складе</span><strong id="dashLow">0</strong></div>
-      </div>
-      <div class="grid-2">
-        <div class="card"><div class="card-title"><h2>Последние операции</h2></div><div id="activityList" class="list"></div></div>
-        <div class="card"><div class="card-title"><h2>Быстрые действия</h2></div>
-          <div class="quick-grid">
-            <button class="quick" data-goto="cash">🧾<span>Касса</span></button>
-            <button class="quick" data-goto="orders">📱<span>Заказы</span></button>
-            <button class="quick admin-only" data-goto="warehouse">📦<span>Склад</span></button>
-            <button class="quick admin-only" data-goto="reports">📈<span>Отчёты</span></button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="page-cash" class="page hide">
+    <section id="page-cash" class="page">
       <div class="page-head"><div><h1>Касса</h1><p class="muted">Открой смену перед продажами и закрой её в конце рабочего дня.</p></div><div class="pill">Позиций: <b id="cartCount">0</b></div></div>
       <div class="card shift-card">
         <div class="shift-head"><div><span id="shiftBadge" class="status cancelled">Касса закрыта</span><h2 id="shiftTitle">Смена не открыта</h2><p id="shiftMeta" class="muted">Откройте кассу, чтобы начать продажи.</p></div><div class="shift-actions"><button id="openShift" class="btn success">🔓 Открыть кассу</button><button id="closeShift" class="btn danger hide">🔒 Закрыть кассу</button></div></div>
