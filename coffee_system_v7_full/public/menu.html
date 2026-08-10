@@ -16,7 +16,7 @@
   <section class="lux-banner" id="promo">
     <div>
       <span class="gold-badge">PREMIUM</span>
-      <h2>Авторское меню In coffee</h2>
+      <h2>Меню In coffee</h2>
       <p>Роскошный вкус, уютная атмосфера и онлайн-заказ за пару касаний.</p>
       <div class="banner-actions"><a href="#productsSection">Смотреть меню</a><a href="#contactsSection" class="ghost-link">Контакты</a><a href="#teamSection" class="ghost-link">Команда</a></div>
     </div>
@@ -42,7 +42,7 @@
         <div class="slide-content">
           <span class="gold-badge">PREMIUM</span>
           <h3>Роскошный вкус каждый день</h3>
-          <p>Авторские напитки, стильная подача и удобный личный кабинет клиента.</p>
+          <p>Кофе, лимонады, мохито и другие напитки с удобным онлайн-заказом.</p>
         </div>
       </article>
     </div>
@@ -99,7 +99,7 @@
       <p>Собираем вкус, сервис и настроение в одном месте — от бариста до менеджера доставки.</p>
     </div>
     <div class="team-grid">
-      <article class="team-card"><div class="team-avatar">☕</div><b>Главный бариста</b><small>Автор напитков</small><p>Следит за вкусом, подачей и качеством каждой чашки.</p></article>
+      <article class="team-card"><div class="team-avatar">☕</div><b>Главный бариста</b><small>Качество напитков</small><p>Следит за вкусом, подачей и качеством каждой чашки.</p></article>
       <article class="team-card"><div class="team-avatar">🛵</div><b>Менеджер доставки</b><small>Быстрая логистика</small><p>Контролирует доставку, адреса и аккуратную передачу заказов.</p></article>
       <article class="team-card"><div class="team-avatar">✨</div><b>Сервис-менеджер</b><small>Забота о гостях</small><p>Помогает клиентам, проверяет заказы и делает сервис премиальным.</p></article>
     </div>
@@ -149,7 +149,7 @@
 
 <div id="drawer" class="drawer hide"><div class="drawer-card"><div class="drawer-head"><h2>Ваш заказ</h2><button id="closeCart">×</button></div><div id="cartList"></div><div class="totals-box"><div class="total-line"><span>Подытог</span><b><span id="drawerSubtotal">0</span> сум</b></div><div id="discountRow" class="total-line discount-line hide"><span>Скидка <span id="promoAppliedCode">FIRST10</span></span><b>−<span id="drawerDiscount">0</span> сум</b></div><div class="total-row final"><span>Итого</span><b><span id="drawerTotal">0</span> сум</b></div></div>
 <div id="checkoutAccount" class="checkout-account"></div>
-<div class="section-label">Промокод</div><div class="promo-box"><div class="promo-copy"><b>🎁 FIRST10</b><small>Скидка 10% на первый онлайн-заказ</small></div><div class="promo-row"><input id="promoCode" placeholder="Введите промокод"><button id="applyPromo" type="button">Применить</button></div><p id="promoStatus" class="promo-status">Войдите в аккаунт клиента, чтобы использовать промокод на первый заказ.</p></div><div class="section-label">Получение заказа</div>
+<div class="section-label">Промокод</div><div class="promo-box"><div class="promo-copy"><b>🎁 <span id="promoOfferCode">FIRST10</span></b><small>Скидка <span id="promoOfferPercent">10</span>% на первый онлайн-заказ</small></div><div class="promo-row"><input id="promoCode" placeholder="Введите промокод"><button id="applyPromo" type="button">Применить</button></div><p id="promoStatus" class="promo-status">Войдите в аккаунт клиента, чтобы использовать промокод на первый заказ.</p></div><div class="section-label">Получение заказа</div>
 <div class="payment-box receive-box"><label class="payment-option delivery-only-option"><input type="radio" name="deliveryType" value="delivery" checked><span><b>🚗 Только доставка</b><small>Укажите адрес — самовывоз для онлайн-заказов отключён</small></span></label></div>
 <div id="deliveryBox" class="delivery-box"><input id="deliveryAddress" placeholder="Адрес доставки: улица, дом, квартира"><div class="map-actions"><button id="findAddress" type="button">🔎 Найти адрес</button><button id="myLocation" type="button">📍 Моё местоположение</button></div><div class="coords-box"><label>Координаты доставки</label><div class="coords-row"><input id="deliveryCoordinates" readonly placeholder="Определятся автоматически"><button id="copyCoordinates" type="button">📋 Скопировать</button></div><button id="shareCoordinates" class="coords-share" type="button">📤 Подготовить и отправить местоположение</button><small id="coordsPrepared" class="coords-prepared">После определения координаты автоматически попадут в сообщение заказа.</small></div><div id="deliveryMap" class="delivery-map"><div id="mapPlaceholder" class="map-placeholder">Яндекс Карта загрузится здесь</div></div><input id="deliveryComment" placeholder="Комментарий курьеру: подъезд, этаж, ориентир"><small id="mapHint" class="map-hint">Укажите адрес или нажмите «Моё местоположение».</small></div>
 <div class="section-label">Оплата</div><div class="payment-box"><label id="receiptOption" class="payment-option hide"><input type="radio" name="paymentMethod" value="receipt" checked><span><b>Перевод на карту</b><small>Единственный способ оплаты онлайн-заказа · загрузите чек</small></span></label></div><div id="receiptPaymentBox" class="delivery-box hide"><div class="receipt-pay-info"><b>💳 Карта для перевода</b><button id="transferCardNumber" type="button" class="transfer-card-number" title="Нажмите, чтобы скопировать"></button><small id="transferCardHolder"></small><div class="payment-copy-actions"><button id="copyCardBtn" type="button">📋 Скопировать карту</button><button id="copyAmountBtn" type="button">💰 Скопировать сумму</button></div><div class="payment-ready-box"><span>К оплате</span><b><span id="payAmountPreview">0</span> сум</b></div><div class="payment-message-actions"><button id="preparePaymentMessage" type="button">✉️ Подготовить сообщение</button><button id="sharePaymentMessage" type="button">📤 Поделиться</button></div><p id="paymentCopyStatus" class="payment-copy-status">Нажмите на номер карты — он сразу скопируется.</p></div><label class="file-input wide-file">📎 Загрузить чек оплаты<input id="paymentReceipt" type="file" accept="image/jpeg,image/png,image/webp"></label><small class="map-hint">Заказ будет принят после проверки чека администратором.</small></div><button id="sendOrder" class="send">Оформить заказ</button><p id="paymentNote" class="note">Для заказа нужен аккаунт клиента.</p></div></div>

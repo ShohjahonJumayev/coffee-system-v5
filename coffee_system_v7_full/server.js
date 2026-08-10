@@ -283,7 +283,11 @@ async function effectiveYandexMapsSettings() {
 
 async function customerFirstOrderEligible(customerId, db = pool) {
   const q = typeof db.query === 'function' ? db : pool;
-  const { rows } = await q.query('SELECT COUNT(*)::int AS count FROM online_orders WHERE customer_id=$1', [customerId]);
+  const { rows } = await q.query(`SELECT COUNT(*)::int AS count
+    FROM online_orders
+    WHERE customer_id=$1
+      AND COALESCE(status,'new') <> 'cancelled'
+      AND COALESCE(payment_status,'unpaid') NOT IN ('cancelled','rejected')`, [customerId]);
   return Number(rows[0]?.count || 0) === 0;
 }
 
@@ -668,6 +672,111 @@ async function initDb() {
         ['Эспрессо','Кофе',15000],['Мохито','Напитки',22000],['Чизкейк','Десерты',30000]
       ];
       for (const p of defaults) await client.query('INSERT INTO products(name,category,price) VALUES($1,$2,$3)', p);
+    }
+
+    const menuV15Applied = (await client.query("SELECT value FROM app_settings WHERE key='photo_menu_v15_applied'")).rows[0]?.value === '1';
+    if (!menuV15Applied) {
+      // v15: синхронизация напитков по актуальному печатному меню In coffee.
+      // Размер хранится в названии, потому что одна карточка товара в POS имеет одну цену.
+      const photoMenuProducts = [
+        // КОФЕ
+        ['Эспрессо (30 мл)','Кофе',20000],
+        ['Доппио (60 мл)','Кофе',27000],
+        ['Американо (250 мл)','Кофе',23000],
+        ['Американо (350 мл)','Кофе',28000],
+        ['Американо (450 мл)','Кофе',32000],
+        ['Капучино (250 мл)','Кофе',28000],
+        ['Капучино (350 мл)','Кофе',33000],
+        ['Капучино (450 мл)','Кофе',38000],
+        ['Латте (250 мл)','Кофе',28000],
+        ['Латте (350 мл)','Кофе',33000],
+        ['Латте (450 мл)','Кофе',38000],
+        ['Флэт Уайт (250 мл)','Кофе',30000],
+        ['Раф (350 мл)','Кофе',41000],
+        ['Раф (450 мл)','Кофе',46000],
+        ['Мокка (250 мл)','Кофе',33000],
+        ['Мокка (350 мл)','Кофе',38000],
+        ['Мокка (450 мл)','Кофе',43000],
+
+        // АЙС КОФЕ
+        ['Айс Американо (500 мл)','Айс кофе',28000],
+        ['Айс Капучино (500 мл)','Айс кофе',33000],
+        ['Айс Латте (500 мл)','Айс кофе',33000],
+
+        // АЙС МАТЧА
+        ['Айс Матча Классическая (500 мл)','Айс матча',33000],
+        ['Айс Матча Клубника (500 мл)','Айс матча',35000],
+        ['Айс Матча Голубика (500 мл)','Айс матча',35000],
+        ['Айс Матча Манго (500 мл)','Айс матча',35000],
+
+        // ЧАЙ
+        ['Чай Чёрный (400 мл)','Чай',15000],
+        ['Чай Чёрный (800 мл)','Чай',20000],
+        ['Чай Зелёный (400 мл)','Чай',15000],
+        ['Чай Зелёный (800 мл)','Чай',20000],
+        ['Чай Жасминовый (400 мл)','Чай',18000],
+        ['Чай Жасминовый (800 мл)','Чай',23000],
+        ['Чай Фруктовый (400 мл)','Чай',18000],
+        ['Чай Фруктовый (800 мл)','Чай',23000],
+
+        // ЛИМОНАДЫ
+        ['Лимонад Классический (500 мл)','Лимонады',30000],
+        ['Лимонад Blue Ocean (500 мл)','Лимонады',30000],
+        ['Лимонад Манго (500 мл)','Лимонады',30000],
+        ['Лимонад Маракуйя (500 мл)','Лимонады',30000],
+        ['Лимонад Клубника (500 мл)','Лимонады',30000],
+        ['Лимонад Арбуз (500 мл)','Лимонады',30000],
+        ['Лимонад Киви (500 мл)','Лимонады',30000],
+
+        // МОХИТО
+        ['Мохито Классический (500 мл)','Мохито',30000],
+        ['Мохито Клубничный (500 мл)','Мохито',35000],
+        ['Мохито Манго (500 мл)','Мохито',35000],
+        ['Мохито Маракуйя (500 мл)','Мохито',35000],
+        ['Мохито Манго-маракуйя (500 мл)','Мохито',35000],
+
+        // МИЛКШЕЙКИ
+        ['Милкшейк Ванильный (500 мл)','Милкшейки',40000],
+        ['Милкшейк Шоколадный (500 мл)','Милкшейки',40000],
+        ['Милкшейк Банановый (500 мл)','Милкшейки',40000],
+        ['Милкшейк Клубничный (500 мл)','Милкшейки',40000],
+        ['Милкшейк Oreo (500 мл)','Милкшейки',40000],
+
+        // ФРЕШИ
+        ['Фреш Морковный (500 мл)','Фреши',38000],
+        ['Фреш Яблочный (500 мл)','Фреши',45000],
+        ['Фреш Апельсиновый (500 мл)','Фреши',55000],
+        ['Фреш Апельсин + Яблоко (500 мл)','Фреши',50000],
+
+        // ДОБАВКИ
+        ['Джус-болы','Добавки',5000],
+        ['Доп. сироп','Добавки',5000],
+        ['Пюре','Добавки',7000],
+        ['Взбитые сливки','Добавки',8000],
+        ['Доп. эспрессо','Добавки',15000]
+      ];
+      for (const [name, category, price] of photoMenuProducts) {
+        const existing = (await client.query(
+          'SELECT id FROM products WHERE LOWER(name)=LOWER($1) AND LOWER(category)=LOWER($2) ORDER BY id LIMIT 1',
+          [name, category]
+        )).rows[0];
+        if (existing) {
+          await client.query('UPDATE products SET price=$1, active=true WHERE id=$2', [price, existing.id]);
+        } else {
+          await client.query('INSERT INTO products(name,category,price,active) VALUES($1,$2,$3,true)', [name, category, price]);
+        }
+      }
+
+      // Старые тестовые карточки без размера скрываем, чтобы не было дублей.
+      await client.query(`UPDATE products SET active=false WHERE
+        (LOWER(category)=LOWER('Кофе') AND LOWER(name) IN (LOWER('Капучино'),LOWER('Латте'),LOWER('Американо'),LOWER('Эспрессо')))
+        OR (LOWER(category)=LOWER('Напитки') AND LOWER(name)=LOWER('Мохито'))`);
+
+      // Авторские напитки пока выключены по просьбе владельца.
+      await client.query(`UPDATE products SET active=false WHERE
+        LOWER(category)=LOWER('Авторские напитки')
+        OR LOWER(name) IN (LOWER('Tokyo Sunrise'),LOWER('Mango Cloud'),LOWER('Berry Spark'),LOWER('Sunset'))`);
+      await client.query("INSERT INTO app_settings(key,value,updated_at) VALUES('photo_menu_v15_applied','1',NOW()) ON CONFLICT(key) DO UPDATE SET value='1',updated_at=NOW()");
     }
     await client.query('COMMIT');
   } catch (e) {
