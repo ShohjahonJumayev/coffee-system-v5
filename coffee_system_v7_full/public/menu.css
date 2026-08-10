@@ -60,3 +60,5 @@ body{background:radial-gradient(circle at top,#3b271d 0,#18110d 17%,#f6efe8 18%,
 
 .business-status{max-width:900px;margin:12px auto 0;padding:12px 16px;border-radius:18px;display:flex;align-items:center;gap:11px;background:rgba(255,250,245,.96);border:1px solid #ead9c9;box-shadow:0 12px 28px rgba(22,13,9,.09)}.business-status .status-dot{width:11px;height:11px;border-radius:999px;flex:0 0 11px;background:#b98545;box-shadow:0 0 0 5px rgba(185,133,69,.12)}.business-status b,.business-status small{display:block}.business-status small{color:#756157;margin-top:3px}.business-status.open{border-color:#cfe7d7;background:#f6fff8}.business-status.open .status-dot{background:#188353;box-shadow:0 0 0 5px rgba(24,131,83,.12)}.business-status.closed{border-color:#efd1cb;background:#fff5f3}.business-status.closed .status-dot{background:#c94a40;box-shadow:0 0 0 5px rgba(201,74,64,.12)}.send:disabled{opacity:.58;cursor:not-allowed;box-shadow:none}
 @media(max-width:930px){.business-status{margin:10px 12px 0}}
+
+.delivery-only-option{background:linear-gradient(135deg,#fffaf4,#f7ead9);border-color:#ddc09a}.delivery-only-option b{color:#8a5a31}

@@ -27,7 +27,7 @@
   <aside id="sidebar" class="sidebar">
     <div class="brand">
       <div class="brand-icon">☕</div>
-      <div><b>In coffee</b><small>v13.8</small></div>
+      <div><b>In coffee</b><small>v14.1</small></div>
     </div>
     <nav id="nav" class="nav">
       <button data-page="dashboard" data-roles="owner,admin,cashier" class="active">📊 <span>Главная</span></button>
@@ -39,7 +39,8 @@
       <button data-page="reports" data-roles="owner,admin">📈 <span>Отчёты</span></button>
       <button data-page="receipts" data-roles="owner,admin,cashier">🧾 <span>Чеки</span></button>
       <button data-page="expenses" data-roles="owner,admin">💸 <span>Расходы</span></button>
-      <button data-page="customers" data-roles="owner,admin">🔗 <span>QR и меню</span></button>
+      <button data-page="shifts" data-roles="owner,admin">🗂️ <span>История смен</span></button>
+      <button data-page="customers" data-roles="owner,admin">👥 <span>Клиенты и QR</span></button>
       <button data-page="users" data-roles="owner">👥 <span>Сотрудники</span></button>
       <button data-page="branches" data-roles="owner">🏪 <span>Филиалы</span></button>
       <button data-page="settings" data-roles="owner,admin,cashier">⚙️ <span>Настройки</span></button>
@@ -91,14 +92,14 @@
       <div class="card shift-card">
         <div class="shift-head"><div><span id="shiftBadge" class="status cancelled">Касса закрыта</span><h2 id="shiftTitle">Смена не открыта</h2><p id="shiftMeta" class="muted">Откройте кассу, чтобы начать продажи.</p></div><div class="shift-actions"><button id="openShift" class="btn success">🔓 Открыть кассу</button><button id="closeShift" class="btn danger hide">🔒 Закрыть кассу</button></div></div>
         <div class="shift-stats">
-          <div><span>Продажи сегодня</span><strong id="shiftTodaySales">0 сум</strong></div>
+          <div><span>Продажи текущей смены</span><strong id="shiftTodaySales">0 сум</strong></div>
           <div><span>Наличные</span><strong id="shiftCashSales">0 сум</strong></div>
           <div><span>Карта</span><strong id="shiftCardSales">0 сум</strong></div>
           <div><span>Онлайн</span><strong id="shiftOnlineSales">0 сум</strong></div>
           <div><span>Расходы</span><strong id="shiftExpenses">0 сум</strong></div>
           <div class="shift-profit"><span>После расходов</span><strong id="shiftProfit">0 сум</strong></div>
         </div>
-        <div id="lastShiftInfo" class="shift-last muted"></div>
+        <div id="lastShiftInfo" class="shift-last muted"></div><div class="actions admin-only"><button class="btn secondary" data-goto="shifts">🗂️ История закрытых смен</button></div>
       </div>
       <div class="pos-layout">
         <div class="card"><div class="card-title"><h2>Товары</h2><input id="productSearch" class="input compact" placeholder="Поиск товара"></div><div id="posProducts" class="product-grid"></div></div>
@@ -147,10 +148,31 @@
       <div class="card"><div id="expensesList" class="list"></div></div>
     </section>
 
+    <section id="page-shifts" class="page hide">
+      <div class="page-head"><div><h1>История смен</h1><p class="muted">Архив закрытых касс: продажи, расходы, внесения и куда ушли деньги.</p></div><button id="refreshShifts" class="btn secondary">Обновить</button></div>
+      <div class="stats four">
+        <div class="stat"><span>Закрытых смен</span><strong id="shiftHistoryCount">0</strong></div>
+        <div class="stat"><span>Продажи в архиве</span><strong id="shiftHistorySales">0 сум</strong></div>
+        <div class="stat"><span>Расходы в архиве</span><strong id="shiftHistoryExpenses">0 сум</strong></div>
+        <div class="stat accent"><span>После расходов</span><strong id="shiftHistoryProfit">0 сум</strong></div>
+      </div>
+      <div class="card"><div id="shiftHistoryList" class="list"></div></div>
+    </section>
+
     <section id="page-customers" class="page hide">
-      <div class="page-head"><div><h1>QR-меню для клиентов</h1><p class="muted">Клиент сканирует QR, выбирает товары и отправляет заказ.</p></div></div>
-      <div class="card qr-card"><div class="qr-preview"><img id="menuQr" alt="QR код In coffee"><span>Высокое качество · H</span></div><div><h2>QR-меню In coffee</h2><p class="muted">PNG 1800 px подходит для обычной печати. SVG остаётся чётким при любом размере.</p><p id="menuUrl" class="url-box"></p><div class="actions"><button id="copyMenuUrl" class="btn primary">Скопировать ссылку</button><a id="openMenuUrl" class="btn secondary" target="_blank" rel="noopener">Открыть меню</a><a id="downloadQrPng" class="btn success">⬇ PNG 1800px</a><a id="downloadQrSvg" class="btn secondary">⬇ SVG</a></div></div></div>
-      <div class="card"><div class="card-title"><h2>Онлайн-оплата</h2><span id="paymeBadge" class="status">Проверка…</span></div><p id="paymeInfo" class="muted"></p><p id="paymeEndpoint" class="url-box"></p></div>
+      <div class="page-head"><div><h1>Клиенты и QR-меню</h1><p class="muted">Регистрации клиентов, QR-меню, оплата и Яндекс Карта.</p></div></div>
+      <div class="stats four">
+        <div class="stat"><span>👥 Всего аккаунтов</span><strong id="custTotal">0</strong></div>
+        <div class="stat"><span>🆕 Новых сегодня</span><strong id="custToday">0</strong></div>
+        <div class="stat"><span>✅ Телефон подтверждён</span><strong id="custVerified">0</strong></div>
+        <div class="stat"><span>🛍 Делали заказы</span><strong id="custWithOrders">0</strong></div>
+      </div>
+      <div class="card"><div class="card-title"><h2>Зарегистрированные клиенты</h2><button id="refreshCustomers" class="btn secondary">Обновить</button></div><div id="customersList" class="list"></div></div>
+      <div class="card qr-card"><div class="qr-preview"><img id="menuQr" alt="QR код In coffee"><span>Высокое качество · H</span></div><div><h2>QR-меню In coffee</h2><p class="muted">Клиент сканирует QR, регистрируется и оформляет заказ.</p><p id="menuUrl" class="url-box"></p><div class="actions"><button id="copyMenuUrl" class="btn primary">Скопировать ссылку</button><a id="openMenuUrl" class="btn secondary" target="_blank" rel="noopener">Открыть меню</a><a id="downloadQrPng" class="btn success">⬇ PNG 1800px</a><a id="downloadQrSvg" class="btn secondary">⬇ SVG</a></div></div></div>
+      <div class="grid-2">
+        <div class="card"><div class="card-title"><h2>Онлайн-оплата</h2><span id="paymeBadge" class="status">Проверка…</span></div><p id="paymeInfo" class="muted"></p><div class="form-grid two admin-only"><input id="transferCardAdmin" class="input" inputmode="numeric" placeholder="Номер карты для перевода"><input id="transferHolderAdmin" class="input" placeholder="Имя получателя"></div><div class="actions admin-only"><button id="saveTransferSettings" class="btn primary">💾 Сохранить карту</button></div><p id="paymeEndpoint" class="url-box"></p><p class="muted tiny">Клиент переводит деньги, загружает чек, а администратор подтверждает оплату в заказе.</p></div>
+        <div class="card"><div class="card-title"><h2>Яндекс Карта</h2><span id="mapsBadge" class="status">Проверка…</span></div><p id="mapsInfo" class="muted"></p><input id="yandexMapKey" class="input wide" type="password" placeholder="API-ключ JavaScript API Яндекс Карт"><div class="actions"><button id="saveYandexMapSettings" class="btn primary">🗺 Сохранить ключ карты</button></div><p class="muted tiny">Ключ нужен для интерактивной карты, поиска адреса и выбора точки доставки.</p></div>
+      </div>
     </section>
 
     <section id="page-users" class="page hide">

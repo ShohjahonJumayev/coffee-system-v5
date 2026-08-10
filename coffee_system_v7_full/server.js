@@ -258,6 +258,29 @@ async function getTelegramVerification(token, purpose) {
   return rows[0] || null;
 }
 
+async function getAppSetting(key) {
+  const { rows } = await pool.query('SELECT value FROM app_settings WHERE key=$1',[key]);
+  return rows[0]?.value ?? '';
+}
+
+async function setAppSetting(key, value) {
+  await pool.query(`INSERT INTO app_settings(key,value,updated_at) VALUES($1,$2,NOW())
+    ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW()`,[key,String(value||'')]);
+}
+
+async function effectiveCardTransferSettings() {
+  const [dbNumber,dbHolder] = await Promise.all([getAppSetting('card_transfer_number'),getAppSetting('card_transfer_holder')]);
+  const cardNumber = String(dbNumber || CARD_TRANSFER_NUMBER || '').trim();
+  const cardHolder = String(dbHolder || CARD_TRANSFER_HOLDER || '').trim();
+  return { configured:Boolean(cardNumber), cardNumber, cardHolder };
+}
+
+async function effectiveYandexMapsSettings() {
+  const dbKey = await getAppSetting('yandex_maps_api_key');
+  const apiKey = String(dbKey || YANDEX_MAPS_API_KEY || '').trim();
+  return { configured:Boolean(apiKey), apiKey };
+}
+
 async function customerFirstOrderEligible(customerId, db = pool) {
   const q = typeof db.query === 'function' ? db : pool;
   const { rows } = await q.query('SELECT COUNT(*)::int AS count FROM online_orders WHERE customer_id=$1', [customerId]);
@@ -504,6 +527,11 @@ async function initDb() {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_cash_shift_per_branch ON cash_shifts(branch_id) WHERE closed_at IS NULL;
       CREATE INDEX IF NOT EXISTS idx_cash_shifts_branch_date ON cash_shifts(branch_id,business_date DESC,opened_at DESC);
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
       CREATE TABLE IF NOT EXISTS customer_accounts (
         id BIGSERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -557,7 +585,7 @@ async function initDb() {
         payment_receipt_data BYTEA,
         payment_reviewed_at TIMESTAMPTZ,
         payment_reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-        delivery_type TEXT NOT NULL DEFAULT 'pickup',
+        delivery_type TEXT NOT NULL DEFAULT 'delivery',
         delivery_address TEXT NOT NULL DEFAULT '',
         delivery_lat DOUBLE PRECISION,
         delivery_lng DOUBLE PRECISION,
@@ -608,7 +636,8 @@ async function initDb() {
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_receipt_data BYTEA;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_reviewed_at TIMESTAMPTZ;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
-      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'pickup';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'delivery';
+      ALTER TABLE online_orders ALTER COLUMN delivery_type SET DEFAULT 'delivery';
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_address TEXT NOT NULL DEFAULT '';
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_lat DOUBLE PRECISION;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_lng DOUBLE PRECISION;
@@ -921,6 +950,10 @@ async function cashShiftSummary(shiftId, db = pool) {
   };
 }
 
+function emptyCashShiftSummary(){
+  return {total_sales:0,cash_sales:0,card_sales:0,online_sales:0,receipts:0,cash_in:0,cash_out:0,expenses:0,profit_after_expenses:0,cash_balance_from_shift:0};
+}
+
 async function businessDaySummary(branchId, businessDate, db = pool) {
   const { rows } = await db.query('SELECT id FROM cash_shifts WHERE branch_id=$1 AND business_date=$2 ORDER BY id',[branchId,businessDate]);
   if(!rows.length) return {total_sales:0,cash_sales:0,card_sales:0,online_sales:0,receipts:0,cash_in:0,cash_out:0,expenses:0,profit_after_expenses:0,cash_balance_from_shift:0};
@@ -1017,11 +1050,10 @@ app.post('/api/cash', auth, async (req,res)=>{
 app.get('/api/cash-shift', auth, async (req,res)=>{
   const branchId=await resolveBranch(req), businessDate=operationalBusinessDate();
   const openShift=await getOpenCashShift(branchId);
-  const openSummary=openShift?await cashShiftSummary(openShift.id):null;
-  const today=await businessDaySummary(branchId,businessDate);
+  const openSummary=openShift?await cashShiftSummary(openShift.id):emptyCashShiftSummary();
   const lastClosed=(await pool.query(`SELECT id,business_date,opened_at,closed_at,closing_total_sales,closing_cash_sales,closing_card_sales,closing_online_sales,closing_cash_in,closing_cash_out,closing_expenses,closing_net_cash
     FROM cash_shifts WHERE branch_id=$1 AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1`,[branchId])).rows[0]||null;
-  res.json({open:Boolean(openShift),shift:openShift?{...openShift,summary:openSummary}:null,businessDate,today,lastClosed});
+  res.json({open:Boolean(openShift),shift:openShift?{...openShift,summary:openSummary}:null,businessDate,current:openSummary,today:openSummary,lastClosed});
 });
 
 app.post('/api/cash-shift/open', auth, async (req,res)=>{
@@ -1044,11 +1076,13 @@ app.post('/api/cash-shift/open', auth, async (req,res)=>{
 app.post('/api/cash-shift/close', auth, async (req,res)=>{
   const branchId=await resolveBranch(req);
   const client=await pool.connect();
+  let committed=false;
   try{
     await client.query('BEGIN');
     const shift=await getOpenCashShift(branchId,client,'update');
     if(!shift){await client.query('ROLLBACK');return res.status(400).json({error:'Касса уже закрыта'});}
     const summary=await cashShiftSummary(shift.id,client);
+    const expenses=(await client.query(`SELECT id,amount,reason,created_at FROM cash_operations WHERE shift_id=$1 AND type='cash_out' ORDER BY created_at,id`,[shift.id])).rows;
     const {rows}=await client.query(`UPDATE cash_shifts SET closed_at=NOW(),closed_by=$1,
       closing_total_sales=$2,closing_cash_sales=$3,closing_card_sales=$4,closing_online_sales=$5,
       closing_cash_in=$6,closing_cash_out=$7,closing_expenses=$8,closing_net_cash=$9
@@ -1057,9 +1091,50 @@ app.post('/api/cash-shift/close', auth, async (req,res)=>{
         summary.cash_in,summary.cash_out,summary.expenses,summary.cash_balance_from_shift,shift.id
       ]);
     await client.query('COMMIT');
-    const today=await businessDaySummary(branchId,String(shift.business_date).slice(0,10));
-    res.json({ok:true,shift:rows[0],summary,today});
-  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release()}
+    committed=true;
+    res.json({ok:true,shift:rows[0],summary,expenses,current:emptyCashShiftSummary()});
+  }catch(e){if(!committed){try{await client.query('ROLLBACK')}catch{}}throw e;}finally{client.release()}
+});
+
+
+app.get('/api/cash-shifts', auth, allow('owner','admin'), async (req,res)=>{
+  const branchId=await resolveBranch(req);
+  const limit=Math.min(200,Math.max(1,Number(req.query.limit)||60));
+  const {rows}=await pool.query(`SELECT s.id,s.business_date,s.opened_at,s.closed_at,
+      s.closing_total_sales,s.closing_cash_sales,s.closing_card_sales,s.closing_online_sales,
+      s.closing_cash_in,s.closing_cash_out,s.closing_expenses,s.closing_net_cash,
+      ou.name AS opened_by_name,cu.name AS closed_by_name,
+      COALESCE((SELECT COUNT(*) FROM sales x WHERE x.shift_id=s.id),0)::int AS receipts_count,
+      COALESCE((SELECT COUNT(*) FROM cash_operations c WHERE c.shift_id=s.id AND c.type='cash_out'),0)::int AS expenses_count
+    FROM cash_shifts s
+    LEFT JOIN users ou ON ou.id=s.opened_by
+    LEFT JOIN users cu ON cu.id=s.closed_by
+    WHERE s.branch_id=$1 AND s.closed_at IS NOT NULL
+    ORDER BY s.closed_at DESC LIMIT $2`,[branchId,limit]);
+  res.json(rows);
+});
+
+app.get('/api/cash-shifts/:id', auth, allow('owner','admin'), async (req,res)=>{
+  const branchId=await resolveBranch(req), id=Number(req.params.id);
+  const shift=(await pool.query(`SELECT s.id,s.business_date,s.opened_at,s.closed_at,
+      s.closing_total_sales,s.closing_cash_sales,s.closing_card_sales,s.closing_online_sales,
+      s.closing_cash_in,s.closing_cash_out,s.closing_expenses,s.closing_net_cash,
+      ou.name AS opened_by_name,cu.name AS closed_by_name
+    FROM cash_shifts s
+    LEFT JOIN users ou ON ou.id=s.opened_by
+    LEFT JOIN users cu ON cu.id=s.closed_by
+    WHERE s.id=$1 AND s.branch_id=$2 AND s.closed_at IS NOT NULL`,[id,branchId])).rows[0];
+  if(!shift) return res.status(404).json({error:'Закрытая смена не найдена'});
+  const sales=(await pool.query(`SELECT s.id,s.method,s.total,s.source,s.created_at,u.name AS user_name
+    FROM sales s LEFT JOIN users u ON u.id=s.user_id WHERE s.shift_id=$1 ORDER BY s.created_at,s.id`,[id])).rows;
+  const saleIds=sales.map(x=>Number(x.id));
+  const items=saleIds.length?(await pool.query(`SELECT sale_id,name_snapshot AS name,price,quantity FROM sale_items WHERE sale_id=ANY($1::bigint[]) ORDER BY id`,[saleIds])).rows:[];
+  const bySale=new Map();
+  for(const item of items){const key=Number(item.sale_id);if(!bySale.has(key))bySale.set(key,[]);bySale.get(key).push(item)}
+  for(const sale of sales) sale.items=bySale.get(Number(sale.id))||[];
+  const operations=(await pool.query(`SELECT c.id,c.type,c.amount,c.reason,c.created_at,u.name AS user_name
+    FROM cash_operations c LEFT JOIN users u ON u.id=c.user_id WHERE c.shift_id=$1 ORDER BY c.created_at,c.id`,[id])).rows;
+  res.json({shift,sales,operations});
 });
 
 app.get('/api/dashboard', auth, async (req,res)=>{
@@ -1407,13 +1482,39 @@ app.get('/api/customers',auth,allow('owner','admin'),async(req,res)=>{
   res.json(rows);
 });
 
+app.get('/api/customer-stats',auth,allow('owner','admin'),async(req,res)=>{
+  const {rows}=await pool.query(`SELECT
+    COUNT(*)::int AS total,
+    COUNT(*) FILTER (WHERE phone_verified=true)::int AS verified,
+    COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'Asia/Tashkent')::date=(NOW() AT TIME ZONE 'Asia/Tashkent')::date)::int AS today,
+    COUNT(*) FILTER (WHERE EXISTS (SELECT 1 FROM online_orders o WHERE o.customer_id=customer_accounts.id))::int AS with_orders
+    FROM customer_accounts`);
+  res.json(rows[0]||{total:0,verified:0,today:0,with_orders:0});
+});
+
+app.get('/api/maps-settings',auth,allow('owner','admin'),async(req,res)=>{
+  const settings=await effectiveYandexMapsSettings();
+  res.json({provider:'Yandex Maps JavaScript API',...settings});
+});
+
+app.put('/api/maps-settings',auth,allow('owner','admin'),async(req,res)=>{
+  const apiKey=String(req.body.apiKey||'').trim().slice(0,220);
+  if(apiKey.length<10) return res.status(400).json({error:'Введите API-ключ Яндекс Карт'});
+  await setAppSetting('yandex_maps_api_key',apiKey);
+  res.json({ok:true,provider:'Yandex Maps JavaScript API',configured:true,apiKey});
+});
+
 app.get('/api/payment-settings', auth, async (req,res)=>{
-  res.json({
-    provider:'Card transfer + receipt',
-    configured:Boolean(CARD_TRANSFER_NUMBER),
-    cardNumber:CARD_TRANSFER_NUMBER,
-    cardHolder:CARD_TRANSFER_HOLDER
-  });
+  const settings=await effectiveCardTransferSettings();
+  res.json({provider:'Card transfer + receipt',...settings});
+});
+
+app.put('/api/payment-settings', auth, allow('owner','admin'), async (req,res)=>{
+  const cardNumber=String(req.body.cardNumber||'').replace(/[^0-9 ]/g,'').trim().slice(0,32);
+  const cardHolder=String(req.body.cardHolder||'').trim().slice(0,120);
+  if(cardNumber.replace(/\s/g,'').length<12) return res.status(400).json({error:'Введите корректный номер карты'});
+  await Promise.all([setAppSetting('card_transfer_number',cardNumber),setAppSetting('card_transfer_holder',cardHolder)]);
+  res.json({ok:true,provider:'Card transfer + receipt',configured:true,cardNumber,cardHolder});
 });
 
 app.get('/api/public/verification-config', async (req,res)=>{
@@ -1423,7 +1524,8 @@ app.get('/api/public/verification-config', async (req,res)=>{
 app.get('/api/public/business-status', async (req,res)=>{ res.json(publicBusinessStatus()); });
 
 app.get('/api/public/payment-config', async (req,res)=>{
-  res.json({provider:'receipt',enabled:Boolean(CARD_TRANSFER_NUMBER),cardNumber:CARD_TRANSFER_NUMBER,cardHolder:CARD_TRANSFER_HOLDER,promoCode:FIRST_ORDER_PROMO_CODE,promoPercent:FIRST_ORDER_PROMO_PERCENT});
+  const settings=await effectiveCardTransferSettings();
+  res.json({provider:'receipt',enabled:settings.configured,cardNumber:settings.cardNumber,cardHolder:settings.cardHolder,promoCode:FIRST_ORDER_PROMO_CODE,promoPercent:FIRST_ORDER_PROMO_PERCENT});
 });
 
 app.get('/api/public/branches' , async (req,res)=>{
@@ -1432,7 +1534,8 @@ app.get('/api/public/branches' , async (req,res)=>{
 });
 
 app.get('/api/public/maps-config', async (req,res)=>{
-  res.json({provider:'Yandex Maps',enabled:Boolean(YANDEX_MAPS_API_KEY),apiKey:YANDEX_MAPS_API_KEY});
+  const settings=await effectiveYandexMapsSettings();
+  res.json({provider:'Yandex Maps',enabled:settings.configured,apiKey:settings.apiKey});
 });
 
 app.get('/api/public/products', async (req,res)=>{
@@ -1450,7 +1553,7 @@ app.post('/api/public/orders', customerAuth, orderLimiter, imageUpload.single('r
   let parsedItems=req.body.items;
   if(typeof parsedItems==='string'){try{parsedItems=JSON.parse(parsedItems)}catch{parsedItems=[]}}
   const branchId=Number(req.body.branchId), customerName=req.customer.name, customerPhone=req.customer.phone, items=Array.isArray(parsedItems)?parsedItems:[];
-  const deliveryType=String(req.body.deliveryType||'pickup');
+  const deliveryType='delivery';
   const deliveryAddress=String(req.body.deliveryAddress||'').trim().slice(0,220);
   const deliveryComment=String(req.body.deliveryComment||'').trim().slice(0,300);
   const hasLat=req.body.deliveryLat!==null&&req.body.deliveryLat!==undefined&&req.body.deliveryLat!=='';
@@ -1461,9 +1564,9 @@ app.post('/api/public/orders', customerAuth, orderLimiter, imageUpload.single('r
   const paymentMethod=String(req.body.paymentMethod||'receipt');
   const promoCode=String(req.body.promoCode||'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,32);
   if(paymentMethod!=='receipt') return res.status(400).json({error:'Для онлайн-заказа доступна только оплата переводом на карту'});
-  if(!['pickup','delivery'].includes(deliveryType)) return res.status(400).json({error:'Некорректный способ получения'});
-  if(deliveryType==='delivery' && !deliveryAddress) return res.status(400).json({error:'Укажите адрес доставки'});
-  if(!CARD_TRANSFER_NUMBER) return res.status(400).json({error:'Оплата переводом пока не настроена'});
+  if(!deliveryAddress) return res.status(400).json({error:'Укажите адрес доставки'});
+  const transferSettings=await effectiveCardTransferSettings();
+  if(!transferSettings.configured) return res.status(400).json({error:'Оплата переводом пока не настроена. Сохраните карту в админке: QR и меню → Онлайн-оплата'});
   if(!req.file) return res.status(400).json({error:'Загрузите чек оплаты'});
   if(!branchId || !items.length) return res.status(400).json({error:'Выберите филиал и товары'});
   const branch=(await pool.query('SELECT id FROM branches WHERE id=$1 AND active=true',[branchId])).rows[0];

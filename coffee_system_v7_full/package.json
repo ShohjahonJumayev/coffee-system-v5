@@ -1,6 +1,6 @@
 {
-  "name": "in-coffee-v13-card-only-online",
-  "version": "13.1.0",
+  "name": "in-coffee-v13-9-delivery-payment-fix",
+  "version": "13.9.0",
   "private": true,
   "scripts": {
     "start": "node server.js",
