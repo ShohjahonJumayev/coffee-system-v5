@@ -27,13 +27,10 @@ const PAYME_TEST_KEY = String(process.env.PAYME_TEST_KEY || '').trim();
 const PAYME_TEST_MODE = String(process.env.PAYME_TEST_MODE || 'false').toLowerCase() === 'true';
 const PAYME_ACCOUNT_FIELD = 'order_id';
 const YANDEX_MAPS_API_KEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
-const ESKIZ_EMAIL = String(process.env.ESKIZ_EMAIL || '').trim();
-const ESKIZ_PASSWORD = String(process.env.ESKIZ_PASSWORD || '').trim();
-const ESKIZ_FROM = String(process.env.ESKIZ_FROM || '4546').trim();
-const OTP_TTL_MINUTES = 5;
-const OTP_MAX_ATTEMPTS = 5;
-const OTP_RESEND_SECONDS = 60;
-const OTP_MAX_SENDS_PER_HOUR = 5;
+const TELEGRAM_BOT_TOKEN = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
+const TELEGRAM_BOT_USERNAME = String(process.env.TELEGRAM_BOT_USERNAME || '').replace(/^@/, '').trim();
+const TELEGRAM_VERIFY_TTL_MINUTES = 10;
+const TELEGRAM_WEBHOOK_SECRET = crypto.createHash('sha256').update(SESSION_SECRET || 'in-coffee').digest('hex');
 
 if (!DATABASE_URL) {
   console.error('DATABASE_URL is required');
@@ -71,7 +68,7 @@ const imageUpload = multer({
 
 const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 const orderLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false });
-const smsLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Слишком много запросов SMS. Попробуйте позже.' } });
+const verificationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Слишком много запросов подтверждения. Попробуйте позже.' } });
 
 function cookieValue(req, name) {
   const raw = req.headers.cookie || '';
@@ -138,105 +135,79 @@ function normalizeCustomerPhone(value) {
   return '+' + digits;
 }
 
-function smsConfigured() {
-  return Boolean(ESKIZ_EMAIL && ESKIZ_PASSWORD);
+function telegramConfigured() {
+  return Boolean(TELEGRAM_BOT_TOKEN && TELEGRAM_BOT_USERNAME && PUBLIC_URL);
 }
 
-function otpHash(phone, purpose, code) {
-  return crypto.createHmac('sha256', SESSION_SECRET).update(`${phone}|${purpose}|${code}`).digest('hex');
-}
-
-function secureOtpCode() {
-  return String(crypto.randomInt(100000, 1000000));
-}
-
-let eskizTokenCache = '';
-async function getEskizToken(force = false) {
-  if (!smsConfigured()) throw new Error('SMS-подтверждение пока не настроено');
-  if (eskizTokenCache && !force) return eskizTokenCache;
-  const body = new FormData();
-  body.append('email', ESKIZ_EMAIL);
-  body.append('password', ESKIZ_PASSWORD);
-  const response = await fetch('https://notify.eskiz.uz/api/auth/login', { method: 'POST', body });
-  let data = {};
-  try { data = await response.json(); } catch {}
-  const token = data?.data?.token;
-  if (!response.ok || !token) throw new Error('Не удалось авторизоваться в SMS-сервисе');
-  eskizTokenCache = token;
-  return token;
-}
-
-async function sendEskizSms(phone, message, retry = true) {
-  const token = await getEskizToken(false);
-  const body = new FormData();
-  body.append('mobile_phone', String(phone).replace(/^\+/, ''));
-  body.append('message', message);
-  if (ESKIZ_FROM) body.append('from', ESKIZ_FROM);
-  const response = await fetch('https://notify.eskiz.uz/api/message/sms/send', {
+async function telegramApi(method, body = {}) {
+  if (!TELEGRAM_BOT_TOKEN) throw new Error('Telegram-бот не настроен');
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    body
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
   });
-  if (response.status === 401 && retry) {
-    eskizTokenCache = '';
-    await getEskizToken(true);
-    return sendEskizSms(phone, message, false);
-  }
   let data = {};
   try { data = await response.json(); } catch {}
-  if (!response.ok) throw new Error(data?.message || 'SMS не отправлено');
-  return data;
+  if (!response.ok || data.ok === false) throw new Error(data.description || `Telegram API: ${method} failed`);
+  return data.result;
 }
 
-async function createAndSendOtp({ phone, purpose, payload = {} }) {
-  if (!smsConfigured()) {
-    const error = new Error('SMS-подтверждение пока не подключено. Добавьте данные Eskiz в Render.');
+async function setupTelegramWebhook() {
+  if (!telegramConfigured()) return;
+  try {
+    await telegramApi('setWebhook', {
+      url: `${PUBLIC_URL}/api/telegram/webhook`,
+      secret_token: TELEGRAM_WEBHOOK_SECRET,
+      allowed_updates: ['message'],
+      drop_pending_updates: false
+    });
+    console.log('Telegram verification webhook configured');
+  } catch (e) {
+    console.error('Telegram webhook setup failed:', e.message);
+  }
+}
+
+async function sendTelegramMessage(chatId, text, replyMarkup) {
+  const body = { chat_id: chatId, text };
+  if (replyMarkup) body.reply_markup = replyMarkup;
+  return telegramApi('sendMessage', body);
+}
+
+function telegramVerificationToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+async function createTelegramVerification({ phone, purpose, payload = {}, customerId = null }) {
+  if (!telegramConfigured()) {
+    const error = new Error('Подтверждение через Telegram пока не подключено. Добавьте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME в Render.');
     error.status = 503;
     throw error;
   }
-  const now = Date.now();
-  const existing = (await pool.query('SELECT send_count,window_started_at,resend_available_at FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2', [phone,purpose])).rows[0];
-  let sendCount = Number(existing?.send_count || 0);
-  let windowStarted = existing?.window_started_at ? new Date(existing.window_started_at).getTime() : now;
-  if (!Number.isFinite(windowStarted) || now - windowStarted >= 60 * 60 * 1000) {
-    sendCount = 0;
-    windowStarted = now;
-  }
-  if (existing?.resend_available_at && new Date(existing.resend_available_at).getTime() > now) {
-    const seconds = Math.ceil((new Date(existing.resend_available_at).getTime() - now) / 1000);
-    const error = new Error(`Повторный код можно отправить через ${seconds} сек.`);
+  await pool.query('DELETE FROM customer_telegram_verifications WHERE expires_at < NOW()');
+  const recent = Number((await pool.query(`SELECT COUNT(*)::int AS c FROM customer_telegram_verifications WHERE phone=$1 AND created_at > NOW() - INTERVAL '15 minutes'`, [phone])).rows[0].c || 0);
+  if (recent >= 5) {
+    const error = new Error('Слишком много попыток подтверждения. Попробуйте позже.');
     error.status = 429;
     throw error;
   }
-  if (sendCount >= OTP_MAX_SENDS_PER_HOUR) {
-    const error = new Error('Слишком много SMS на этот номер. Попробуйте через час.');
-    error.status = 429;
-    throw error;
-  }
-  const code = secureOtpCode();
-  const expiresAt = new Date(now + OTP_TTL_MINUTES * 60 * 1000);
-  const resendAt = new Date(now + OTP_RESEND_SECONDS * 1000);
-  await sendEskizSms(phone, `In coffee: kod podtverzhdeniya ${code}. Nikomu ne soobshchayte.`);
-  await pool.query(`INSERT INTO customer_sms_verifications(phone,purpose,code_hash,payload,expires_at,attempts,send_count,window_started_at,resend_available_at,created_at,updated_at)
-    VALUES($1,$2,$3,$4,$5,0,$6,$7,$8,NOW(),NOW())
-    ON CONFLICT(phone,purpose) DO UPDATE SET code_hash=EXCLUDED.code_hash,payload=EXCLUDED.payload,expires_at=EXCLUDED.expires_at,attempts=0,send_count=EXCLUDED.send_count,window_started_at=EXCLUDED.window_started_at,resend_available_at=EXCLUDED.resend_available_at,updated_at=NOW()`,
-    [phone,purpose,otpHash(phone,purpose,code),JSON.stringify(payload),expiresAt,sendCount+1,new Date(windowStarted),resendAt]);
-  return { ok:true, expiresIn: OTP_TTL_MINUTES * 60, resendIn: OTP_RESEND_SECONDS };
+  const token = telegramVerificationToken();
+  const expiresAt = new Date(Date.now() + TELEGRAM_VERIFY_TTL_MINUTES * 60 * 1000);
+  await pool.query(`INSERT INTO customer_telegram_verifications(token,purpose,phone,customer_id,payload,expires_at)
+    VALUES($1,$2,$3,$4,$5,$6)`, [token,purpose,phone,customerId,JSON.stringify(payload),expiresAt]);
+  return {
+    ok: true,
+    token,
+    telegramUrl: `https://t.me/${TELEGRAM_BOT_USERNAME}?start=${token}`,
+    expiresIn: TELEGRAM_VERIFY_TTL_MINUTES * 60,
+    provider: 'Telegram'
+  };
 }
 
-async function verifyOtp(phone, purpose, code) {
-  const row = (await pool.query('SELECT * FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2', [phone,purpose])).rows[0];
-  if (!row) return { ok:false, status:400, error:'Сначала запросите SMS-код' };
-  if (Number(row.attempts || 0) >= OTP_MAX_ATTEMPTS) return { ok:false, status:429, error:'Слишком много неверных попыток. Запросите новый код.' };
-  if (new Date(row.expires_at).getTime() < Date.now()) return { ok:false, status:400, error:'Код истёк. Запросите новый.' };
-  const supplied = otpHash(phone,purpose,String(code||'').trim());
-  const expected = String(row.code_hash || '');
-  const good = supplied.length === expected.length && crypto.timingSafeEqual(Buffer.from(supplied), Buffer.from(expected));
-  if (!good) {
-    await pool.query('UPDATE customer_sms_verifications SET attempts=attempts+1,updated_at=NOW() WHERE phone=$1 AND purpose=$2', [phone,purpose]);
-    return { ok:false, status:400, error:'Неверный SMS-код' };
-  }
-  return { ok:true, record:row };
+async function getTelegramVerification(token, purpose) {
+  const value = String(token || '').trim();
+  if (!/^[A-Za-z0-9_-]{20,64}$/.test(value)) return null;
+  const { rows } = await pool.query(`SELECT * FROM customer_telegram_verifications WHERE token=$1 AND purpose=$2`, [value,purpose]);
+  return rows[0] || null;
 }
 
 async function customerAuth(req, res, next) {
@@ -479,6 +450,20 @@ async function initDb() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         PRIMARY KEY(phone,purpose)
       );
+      CREATE TABLE IF NOT EXISTS customer_telegram_verifications (
+        token TEXT PRIMARY KEY,
+        purpose TEXT NOT NULL CHECK (purpose IN ('register','verify_existing')),
+        phone TEXT NOT NULL,
+        customer_id BIGINT REFERENCES customer_accounts(id) ON DELETE CASCADE,
+        payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+        telegram_user_id BIGINT,
+        telegram_chat_id BIGINT,
+        verified BOOLEAN NOT NULL DEFAULT FALSE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_telegram_verify_phone_created ON customer_telegram_verifications(phone,created_at DESC);
       CREATE TABLE IF NOT EXISTS online_orders (
         id BIGSERIAL PRIMARY KEY,
         branch_id INTEGER NOT NULL REFERENCES branches(id),
@@ -1012,7 +997,65 @@ app.get('/api/customer-qr/download', auth, allow('owner','admin'), async (req,re
 });
 
 
-app.post('/api/customer/register/start', smsLimiter, async (req,res)=>{
+app.post('/api/telegram/webhook', async (req,res)=>{
+  if(!telegramConfigured()) return res.sendStatus(204);
+  const secret=String(req.get('X-Telegram-Bot-Api-Secret-Token')||'');
+  if(secret!==TELEGRAM_WEBHOOK_SECRET) return res.sendStatus(403);
+  const message=req.body?.message;
+  if(!message) return res.json({ok:true});
+  const chatId=message.chat?.id, fromId=message.from?.id;
+  if(!chatId||!fromId) return res.json({ok:true});
+
+  try{
+    const text=String(message.text||'').trim();
+    const startMatch=text.match(/^\/start(?:@\w+)?\s+([A-Za-z0-9_-]{20,64})$/);
+    if(startMatch){
+      const token=startMatch[1];
+      const {rows}=await pool.query('SELECT * FROM customer_telegram_verifications WHERE token=$1',[token]);
+      const record=rows[0];
+      if(!record||new Date(record.expires_at).getTime()<Date.now()){
+        await sendTelegramMessage(chatId,'Ссылка In coffee истекла. Вернитесь на сайт и начните подтверждение заново.',{remove_keyboard:true});
+        return res.json({ok:true});
+      }
+      await pool.query('UPDATE customer_telegram_verifications SET telegram_user_id=$1,telegram_chat_id=$2,updated_at=NOW() WHERE token=$3',[fromId,chatId,token]);
+      await sendTelegramMessage(chatId,`In coffee хочет подтвердить номер ${record.phone}. Нажмите кнопку ниже и отправьте именно свой номер Telegram.`,{
+        keyboard:[[{text:'📱 Поделиться моим номером',request_contact:true}]],
+        resize_keyboard:true,
+        one_time_keyboard:true,
+        input_field_placeholder:'Нажмите кнопку подтверждения'
+      });
+      return res.json({ok:true});
+    }
+
+    if(message.contact){
+      const {rows}=await pool.query(`SELECT * FROM customer_telegram_verifications
+        WHERE telegram_user_id=$1 AND telegram_chat_id=$2 AND verified=false AND expires_at>NOW()
+        ORDER BY created_at DESC LIMIT 1`,[fromId,chatId]);
+      const record=rows[0];
+      if(!record){
+        await sendTelegramMessage(chatId,'Сначала откройте кнопку «Подтвердить через Telegram» на сайте In coffee.',{remove_keyboard:true});
+        return res.json({ok:true});
+      }
+      if(!message.contact.user_id||Number(message.contact.user_id)!==Number(fromId)){
+        await sendTelegramMessage(chatId,'Можно подтвердить только свой номер Telegram. Нажмите «Поделиться моим номером».');
+        return res.json({ok:true});
+      }
+      const phone=normalizeCustomerPhone(message.contact.phone_number);
+      if(!phone||phone!==record.phone){
+        await sendTelegramMessage(chatId,`Этот Telegram привязан к номеру ${phone||'неизвестно'}, а на сайте указан ${record.phone}. Вернитесь на сайт и укажите свой номер.`,{remove_keyboard:true});
+        return res.json({ok:true});
+      }
+      await pool.query('UPDATE customer_telegram_verifications SET verified=true,updated_at=NOW() WHERE token=$1',[record.token]);
+      await sendTelegramMessage(chatId,'✅ Номер подтверждён для In coffee. Вернитесь на сайт — регистрация или подтверждение завершится автоматически.',{remove_keyboard:true});
+      return res.json({ok:true});
+    }
+  }catch(e){
+    console.error('Telegram webhook error:',e.message);
+  }
+  res.json({ok:true});
+});
+
+app.post('/api/customer/register/start', verificationLimiter, async (req,res)=>{
   const name=String(req.body.name||'').trim().slice(0,80);
   const phone=normalizeCustomerPhone(req.body.phone);
   const password=String(req.body.password||'');
@@ -1022,30 +1065,40 @@ app.post('/api/customer/register/start', smsLimiter, async (req,res)=>{
   const exists=(await pool.query('SELECT id FROM customer_accounts WHERE phone=$1',[phone])).rows[0];
   if(exists) return res.status(400).json({error:'Аккаунт с таким номером уже существует. Выполните вход.'});
   try{
-    const result=await createAndSendOtp({phone,purpose:'register',payload:{name,passwordHash:hashPassword(password)}});
+    const result=await createTelegramVerification({phone,purpose:'register',payload:{name,passwordHash:hashPassword(password)}});
     res.json({...result,phoneMasked:phone.replace(/(\+998\d{2})\d{5}(\d{2})/,'$1*****$2')});
-  }catch(e){res.status(e.status||502).json({error:e.message||'Не удалось отправить SMS'})}
+  }catch(e){res.status(e.status||502).json({error:e.message||'Не удалось начать подтверждение через Telegram'})}
 });
 
-app.post('/api/customer/register/verify', loginLimiter, async (req,res)=>{
-  const phone=normalizeCustomerPhone(req.body.phone);
-  const code=String(req.body.code||'').replace(/\D/g,'').slice(0,6);
-  if(!phone||code.length!==6) return res.status(400).json({error:'Введите 6-значный SMS-код'});
-  const check=await verifyOtp(phone,'register',code);
-  if(!check.ok) return res.status(check.status).json({error:check.error});
-  const payload=check.record.payload||{};
-  const name=String(payload.name||'').trim().slice(0,80);
-  const passwordHash=String(payload.passwordHash||'');
+app.get('/api/customer/register/status', verificationLimiter, async (req,res)=>{
+  const token=String(req.query.token||'');
+  const record=await getTelegramVerification(token,'register');
+  if(!record) return res.status(404).json({error:'Ссылка подтверждения не найдена'});
+  if(new Date(record.expires_at).getTime()<Date.now()) return res.status(400).json({error:'Ссылка подтверждения истекла. Начните регистрацию заново.'});
+  if(!record.verified) return res.json({ok:true,verified:false});
+  if(record.customer_id){
+    const customer=(await pool.query('SELECT id,name,phone,phone_verified,created_at FROM customer_accounts WHERE id=$1',[record.customer_id])).rows[0];
+    if(customer){ setCustomerCookie(res,signCustomer(customer)); return res.json({ok:true,verified:true,customer}); }
+  }
+  const payload=record.payload||{};
+  const name=String(payload.name||'').trim().slice(0,80), passwordHash=String(payload.passwordHash||'');
   if(!name||!passwordHash) return res.status(400).json({error:'Данные регистрации истекли. Начните регистрацию заново.'});
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
-    const {rows}=await client.query('INSERT INTO customer_accounts(name,phone,password_hash,phone_verified) VALUES($1,$2,$3,true) RETURNING id,name,phone,phone_verified,created_at',[name,phone,passwordHash]);
-    await client.query('DELETE FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2',[phone,'register']);
-    await client.query('COMMIT');
+    const locked=(await client.query("SELECT * FROM customer_telegram_verifications WHERE token=$1 AND purpose='register' FOR UPDATE",[token])).rows[0];
+    if(!locked||!locked.verified) { await client.query('ROLLBACK'); return res.json({ok:true,verified:false}); }
+    if(locked.customer_id){
+      const customer=(await client.query('SELECT id,name,phone,phone_verified,created_at FROM customer_accounts WHERE id=$1',[locked.customer_id])).rows[0];
+      await client.query('COMMIT');
+      if(customer){ setCustomerCookie(res,signCustomer(customer)); return res.json({ok:true,verified:true,customer}); }
+    }
+    const {rows}=await client.query('INSERT INTO customer_accounts(name,phone,password_hash,phone_verified) VALUES($1,$2,$3,true) RETURNING id,name,phone,phone_verified,created_at',[name,record.phone,passwordHash]);
     const customer=rows[0];
+    await client.query('UPDATE customer_telegram_verifications SET customer_id=$1,updated_at=NOW() WHERE token=$2',[customer.id,token]);
+    await client.query('COMMIT');
     setCustomerCookie(res,signCustomer(customer));
-    res.json({ok:true,customer});
+    res.json({ok:true,verified:true,customer});
   }catch(e){
     await client.query('ROLLBACK');
     if(e.code==='23505') return res.status(400).json({error:'Аккаунт с таким номером уже существует'});
@@ -1064,23 +1117,24 @@ app.post('/api/customer/login', loginLimiter, async (req,res)=>{
   res.json({ok:true,customer:{id:customer.id,name:customer.name,phone:customer.phone,phone_verified:customer.phone_verified,created_at:customer.created_at}});
 });
 
-app.post('/api/customer/verification/send', customerAuth, smsLimiter, async (req,res)=>{
+app.post('/api/customer/verification/send', customerAuth, verificationLimiter, async (req,res)=>{
   if(req.customer.phone_verified) return res.json({ok:true,alreadyVerified:true});
   try{
-    const result=await createAndSendOtp({phone:req.customer.phone,purpose:'verify_existing',payload:{customerId:req.customer.id}});
+    const result=await createTelegramVerification({phone:req.customer.phone,purpose:'verify_existing',payload:{customerId:req.customer.id},customerId:req.customer.id});
     res.json({...result,phoneMasked:req.customer.phone.replace(/(\+998\d{2})\d{5}(\d{2})/,'$1*****$2')});
-  }catch(e){res.status(e.status||502).json({error:e.message||'Не удалось отправить SMS'})}
+  }catch(e){res.status(e.status||502).json({error:e.message||'Не удалось начать подтверждение через Telegram'})}
 });
 
-app.post('/api/customer/verification/verify', customerAuth, loginLimiter, async (req,res)=>{
-  if(req.customer.phone_verified) return res.json({ok:true,customer:req.customer});
-  const code=String(req.body.code||'').replace(/\D/g,'').slice(0,6);
-  if(code.length!==6) return res.status(400).json({error:'Введите 6-значный SMS-код'});
-  const check=await verifyOtp(req.customer.phone,'verify_existing',code);
-  if(!check.ok) return res.status(check.status).json({error:check.error});
+app.get('/api/customer/verification/status', customerAuth, verificationLimiter, async (req,res)=>{
+  if(req.customer.phone_verified) return res.json({ok:true,verified:true,customer:req.customer});
+  const token=String(req.query.token||'');
+  const record=await getTelegramVerification(token,'verify_existing');
+  if(!record||Number(record.customer_id)!==Number(req.customer.id)) return res.status(404).json({error:'Ссылка подтверждения не найдена'});
+  if(new Date(record.expires_at).getTime()<Date.now()) return res.status(400).json({error:'Ссылка подтверждения истекла. Начните заново.'});
+  if(!record.verified) return res.json({ok:true,verified:false});
   const {rows}=await pool.query('UPDATE customer_accounts SET phone_verified=true,updated_at=NOW() WHERE id=$1 RETURNING id,name,phone,phone_verified,active,created_at',[req.customer.id]);
-  await pool.query('DELETE FROM customer_sms_verifications WHERE phone=$1 AND purpose=$2',[req.customer.phone,'verify_existing']);
-  res.json({ok:true,customer:rows[0]});
+  await pool.query('DELETE FROM customer_telegram_verifications WHERE token=$1',[token]);
+  res.json({ok:true,verified:true,customer:rows[0]});
 });
 
 app.post('/api/customer/logout',(req,res)=>{clearCustomerCookie(res);res.json({ok:true})});
@@ -1132,8 +1186,8 @@ app.get('/api/payment-settings', auth, async (req,res)=>{
   });
 });
 
-app.get('/api/public/sms-config', async (req,res)=>{
-  res.json({provider:'Eskiz',enabled:smsConfigured(),otpTtlMinutes:OTP_TTL_MINUTES});
+app.get('/api/public/verification-config', async (req,res)=>{
+  res.json({provider:'Telegram',enabled:telegramConfigured(),botUsername:TELEGRAM_BOT_USERNAME,ttlMinutes:TELEGRAM_VERIFY_TTL_MINUTES});
 });
 
 app.get('/api/public/payment-config', async (req,res)=>{
@@ -1159,7 +1213,7 @@ app.get('/api/public/products', async (req,res)=>{
 });
 
 app.post('/api/public/orders', customerAuth, orderLimiter, async (req,res)=>{
-  if(!req.customer.phone_verified) return res.status(403).json({error:'Подтвердите номер телефона по SMS перед заказом'});
+  if(!req.customer.phone_verified) return res.status(403).json({error:'Подтвердите номер телефона через Telegram перед заказом'});
   const branchId=Number(req.body.branchId), customerName=req.customer.name, customerPhone=req.customer.phone, items=Array.isArray(req.body.items)?req.body.items:[];
   const deliveryType=String(req.body.deliveryType||'pickup');
   const deliveryAddress=String(req.body.deliveryAddress||'').trim().slice(0,220);
@@ -1349,7 +1403,10 @@ app.use((err, req, res, next) => {
 });
 
 initDb().then(() => {
-  app.listen(PORT, HOST, () => console.log(`In coffee v10: http://${HOST}:${PORT}`));
+  app.listen(PORT, HOST, async () => {
+    console.log(`In coffee v12: http://${HOST}:${PORT}`);
+    await setupTelegramWebhook();
+  });
 }).catch(err => {
   console.error('Database init failed:', err);
   process.exit(1);

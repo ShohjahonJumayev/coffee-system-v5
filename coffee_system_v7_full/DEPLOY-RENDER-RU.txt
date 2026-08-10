@@ -1,13 +1,9 @@
-IN COFFEE v11 — SMS-ПОДТВЕРЖДЕНИЕ
+IN COFFEE v12 — TELEGRAM VERIFY
 
-1. Замените текущие файлы проекта файлами v11 и сделайте Commit changes.
-2. В Render -> Web Service -> Environment добавьте:
-   ESKIZ_EMAIL = email аккаунта Eskiz
-   ESKIZ_PASSWORD = пароль/API-секрет Eskiz
-   ESKIZ_FROM = 4546
-3. Save changes / Deploy latest commit.
-4. В Eskiz должен быть активный аккаунт и возможность отправки SMS.
-5. Старые клиенты v10 после первого входа увидят подтверждение номера по SMS.
-6. Номер в заказе всегда берётся из подтверждённого аккаунта.
+1. Загрузите файлы v12 в текущую папку проекта GitHub.
+2. Render -> Environment: добавьте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME.
+3. Убедитесь, что PUBLIC_URL содержит полный адрес вашего сайта.
+4. Сделайте Deploy latest commit.
+5. В логах должна появиться строка: Telegram verification webhook configured
 
-Остальные переменные (DATABASE_URL, SESSION_SECRET, ADMIN_PASSWORD, Payme, Yandex Maps) не меняйте.
+Eskiz / SMS переменные больше не нужны.
