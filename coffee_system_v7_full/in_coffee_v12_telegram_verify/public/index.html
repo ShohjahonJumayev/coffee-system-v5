@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>In coffee</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="toast" class="toast"></div>
+
+<div id="login" class="login-screen">
+  <div class="login-card">
+    <div class="login-logo">☕</div>
+    <h1>In coffee</h1>
+    <p class="muted center">Управление кофейней</p>
+    <input id="loginUser" class="input" placeholder="Логин" autocomplete="username">
+    <input id="loginPassword" class="input" type="password" placeholder="Пароль" autocomplete="current-password">
+    <button id="loginBtn" class="btn primary full">Войти</button>
+    <div id="loginError" class="error"></div>
+  </div>
+</div>
+
+<div id="app" class="app hide">
+  <div id="overlay" class="overlay"></div>
+  <aside id="sidebar" class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">☕</div>
+      <div><b>In coffee</b><small>v10</small></div>
+    </div>
+    <nav id="nav" class="nav">
+      <button data-page="dashboard" data-roles="owner,admin,cashier" class="active">📊 <span>Главная</span></button>
+      <button data-page="cash" data-roles="owner,admin,cashier">🧾 <span>Касса</span></button>
+      <button data-page="orders" data-roles="owner,admin,cashier">📱 <span>Онлайн-заказы</span><i id="ordersBadge" class="badge hide">0</i></button>
+      <button data-page="products" data-roles="owner,admin">☕ <span>Товары</span></button>
+      <button data-page="warehouse" data-roles="owner,admin">📦 <span>Склад</span><i id="stockBadge" class="badge warn hide">0</i></button>
+      <button data-page="recipes" data-roles="owner,admin">🧪 <span>Рецепты</span></button>
+      <button data-page="reports" data-roles="owner,admin">📈 <span>Отчёты</span></button>
+      <button data-page="receipts" data-roles="owner,admin,cashier">🧾 <span>Чеки</span></button>
+      <button data-page="expenses" data-roles="owner,admin">💸 <span>Расходы</span></button>
+      <button data-page="customers" data-roles="owner,admin">🔗 <span>QR и меню</span></button>
+      <button data-page="users" data-roles="owner">👥 <span>Сотрудники</span></button>
+      <button data-page="branches" data-roles="owner">🏪 <span>Филиалы</span></button>
+      <button data-page="settings" data-roles="owner,admin,cashier">⚙️ <span>Настройки</span></button>
+    </nav>
+    <div class="sidebar-footer">
+      <div id="sidebarUser" class="user-card"></div>
+      <button id="logoutBtn" class="logout">🚪 Выйти</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <button id="menuBtn" class="icon-btn mobile-only">☰</button>
+      <div>
+        <b id="topTitle">Главная</b>
+        <small id="topSubtitle">Обзор кофейни</small>
+      </div>
+      <div class="top-actions">
+        <select id="branchSelect" class="select"></select>
+      </div>
+    </header>
+
+    <section id="page-dashboard" class="page">
+      <div class="hero">
+        <div><h1>Добро пожаловать 👋</h1><p class="muted">Продажи, касса и остатки в одном месте.</p></div>
+        <button class="btn primary" data-goto="cash">Открыть кассу</button>
+      </div>
+      <div class="stats four">
+        <div class="stat"><span>💰 В кассе</span><strong id="dashCash">0 сум</strong></div>
+        <div class="stat"><span>📈 Продажи</span><strong id="dashSales">0 сум</strong></div>
+        <div class="stat"><span>💸 Расходы</span><strong id="dashExpenses">0 сум</strong></div>
+        <div class="stat"><span>📦 Мало на складе</span><strong id="dashLow">0</strong></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><div class="card-title"><h2>Последние операции</h2></div><div id="activityList" class="list"></div></div>
+        <div class="card"><div class="card-title"><h2>Быстрые действия</h2></div>
+          <div class="quick-grid">
+            <button class="quick" data-goto="cash">🧾<span>Касса</span></button>
+            <button class="quick" data-goto="orders">📱<span>Заказы</span></button>
+            <button class="quick admin-only" data-goto="warehouse">📦<span>Склад</span></button>
+            <button class="quick admin-only" data-goto="reports">📈<span>Отчёты</span></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-cash" class="page hide">
+      <div class="page-head"><div><h1>Касса</h1><p class="muted">Нажимай на товары, чтобы добавить их в чек.</p></div><div class="pill">Позиций: <b id="cartCount">0</b></div></div>
+      <div class="pos-layout">
+        <div class="card"><div class="card-title"><h2>Товары</h2><input id="productSearch" class="input compact" placeholder="Поиск товара"></div><div id="posProducts" class="product-grid"></div></div>
+        <div class="card receipt-panel"><div class="card-title"><h2>Текущий чек</h2><button id="clearCart" class="text-btn">Очистить</button></div><div id="cartList" class="list grow"></div><div class="checkout"><div class="checkout-total"><span>Итого</span><strong><span id="cartTotal">0</span> сум</strong></div><div class="pay-grid"><button id="cashPay" class="btn success">💵 Наличные</button><button id="cardPay" class="btn primary">💳 Карта</button></div></div></div>
+      </div>
+      <div class="card"><div class="card-title"><h2>Деньги в кассе</h2></div><div class="actions"><button id="cashIn" class="btn secondary">➕ Внести</button><button id="cashOut" class="btn danger admin-only">➖ Изъять / расход</button></div></div>
+    </section>
+
+    <section id="page-orders" class="page hide">
+      <div class="page-head"><div><h1>Онлайн-заказы</h1><p class="muted">Заказы клиентов с QR-меню.</p></div><button id="refreshOrders" class="btn secondary">Обновить</button></div>
+      <div class="card"><div id="ordersList" class="list"></div></div>
+    </section>
+
+    <section id="page-products" class="page hide">
+      <div class="page-head"><div><h1>Товары</h1><p class="muted">Меню, категории и цены.</p></div></div>
+      <div class="card form-card"><h2>Добавить товар</h2><div class="form-grid four"><input id="productName" class="input" placeholder="Название"><input id="productCategory" class="input" placeholder="Категория, например Кофе"><input id="productPrice" class="input" type="number" placeholder="Цена, сум"><label class="file-input">📷 Фото<input id="productImage" type="file" accept="image/jpeg,image/png,image/webp"></label></div><button id="addProduct" class="btn success">Добавить</button><p class="muted tiny">Фото автоматически уменьшается перед загрузкой. JPG, PNG или WebP.</p></div>
+      <div class="card"><div id="productsList" class="list"></div></div>
+    </section>
+
+    <section id="page-warehouse" class="page hide">
+      <div class="page-head"><div><h1>Склад</h1><p class="muted">Остатки и минимальные уровни.</p></div></div>
+      <div class="card form-card"><h2>Добавить позицию</h2><div class="form-grid four"><input id="stockName" class="input" placeholder="Название"><input id="stockQty" class="input" type="number" step="0.001" placeholder="Количество"><input id="stockUnit" class="input" placeholder="шт / кг / л"><input id="stockThreshold" class="input" type="number" step="0.001" placeholder="Минимум"></div><button id="addStock" class="btn success">Добавить</button></div>
+      <div class="card"><div id="warehouseList" class="list"></div></div>
+      <div class="card"><div class="card-title"><h2>История склада</h2><button id="refreshMovements" class="text-btn">Обновить</button></div><div id="warehouseMovements" class="list"></div></div>
+    </section>
+
+    <section id="page-recipes" class="page hide">
+      <div class="page-head"><div><h1>Рецепты</h1><p class="muted">Что автоматически списывать со склада при продаже.</p></div></div>
+      <div class="card"><label class="label">Товар</label><select id="recipeProduct" class="select wide"></select><div id="recipeEditor" class="recipe-editor"></div><button id="saveRecipe" class="btn primary">Сохранить рецепт</button></div>
+    </section>
+
+    <section id="page-reports" class="page hide">
+      <div class="page-head"><div><h1>Отчёты</h1><p class="muted">Продажи, расходы и прибыль.</p></div><select id="reportPeriod" class="select"><option value="today">Сегодня</option><option value="week">Эта неделя</option><option value="month">Этот месяц</option><option value="30d">Последние 30 дней</option></select></div>
+      <div class="stats six"><div class="stat"><span>Продажи</span><strong id="repSales">0</strong></div><div class="stat"><span>Наличные</span><strong id="repCash">0</strong></div><div class="stat"><span>Карта</span><strong id="repCard">0</strong></div><div class="stat"><span>Онлайн</span><strong id="repOnline">0</strong></div><div class="stat"><span>Расходы</span><strong id="repExpenses">0</strong></div><div class="stat accent"><span>Прибыль*</span><strong id="repProfit">0</strong></div></div>
+      <div class="grid-2"><div class="card"><div class="card-title"><h2>Топ товаров</h2></div><div id="topProducts" class="list"></div></div><div class="card"><div class="card-title"><h2>Продажи по дням</h2></div><div id="dailyBars" class="bars"></div></div></div>
+      <p class="muted tiny">* Прибыль здесь считается как продажи минус расходы из кассы. Себестоимость отдельно не рассчитывается.</p>
+    </section>
+
+    <section id="page-receipts" class="page hide">
+      <div class="page-head"><div><h1>Чеки</h1><p class="muted">История продаж с составом каждого чека.</p></div></div>
+      <div class="card"><div id="receiptsList" class="list"></div></div>
+    </section>
+
+    <section id="page-expenses" class="page hide">
+      <div class="page-head"><div><h1>Расходы</h1><p class="muted">История изъятий из кассы.</p></div></div>
+      <div class="card"><div id="expensesList" class="list"></div></div>
+    </section>
+
+    <section id="page-customers" class="page hide">
+      <div class="page-head"><div><h1>QR-меню для клиентов</h1><p class="muted">Клиент сканирует QR, выбирает товары и отправляет заказ.</p></div></div>
+      <div class="card qr-card"><div class="qr-preview"><img id="menuQr" alt="QR код In coffee"><span>Высокое качество · H</span></div><div><h2>QR-меню In coffee</h2><p class="muted">PNG 1800 px подходит для обычной печати. SVG остаётся чётким при любом размере.</p><p id="menuUrl" class="url-box"></p><div class="actions"><button id="copyMenuUrl" class="btn primary">Скопировать ссылку</button><a id="openMenuUrl" class="btn secondary" target="_blank" rel="noopener">Открыть меню</a><a id="downloadQrPng" class="btn success">⬇ PNG 1800px</a><a id="downloadQrSvg" class="btn secondary">⬇ SVG</a></div></div></div>
+      <div class="card"><div class="card-title"><h2>Онлайн-оплата</h2><span id="paymeBadge" class="status">Проверка…</span></div><p id="paymeInfo" class="muted"></p><p id="paymeEndpoint" class="url-box"></p></div>
+    </section>
+
+    <section id="page-users" class="page hide">
+      <div class="page-head"><div><h1>Сотрудники</h1><p class="muted">Владелец, администраторы и кассиры.</p></div></div>
+      <div class="card form-card"><h2>Новый сотрудник</h2><div class="form-grid five"><input id="userName" class="input" placeholder="Имя"><input id="userLogin" class="input" placeholder="Логин"><input id="userPassword" class="input" type="password" placeholder="Пароль от 8 символов"><select id="userRole" class="select"><option value="cashier">Кассир</option><option value="admin">Администратор</option><option value="owner">Владелец</option></select><select id="userBranch" class="select"></select></div><button id="addUser" class="btn success">Добавить сотрудника</button></div>
+      <div class="card"><div id="usersList" class="list"></div></div>
+    </section>
+
+    <section id="page-branches" class="page hide">
+      <div class="page-head"><div><h1>Филиалы</h1><p class="muted">Добавляй новые точки и переключайся между ними.</p></div></div>
+      <div class="card form-card"><h2>Новый филиал</h2><div class="form-grid two"><input id="branchName" class="input" placeholder="Название филиала"><input id="branchAddress" class="input" placeholder="Адрес"></div><button id="addBranch" class="btn success">Добавить филиал</button></div>
+      <div class="card"><div id="branchesList" class="list"></div></div>
+    </section>
+
+    <section id="page-settings" class="page hide">
+      <div class="page-head"><div><h1>Настройки</h1><p class="muted">Безопасность аккаунта.</p></div></div>
+      <div class="card form-card narrow"><h2>Изменить пароль</h2><input id="currentPassword" class="input" type="password" placeholder="Текущий пароль"><input id="newPassword" class="input" type="password" placeholder="Новый пароль, минимум 8 символов"><button id="changePassword" class="btn primary">Изменить пароль</button></div>
+      <div class="card form-card narrow admin-only"><h2>Экспорт данных</h2><p class="muted">Скачивает JSON-копию операционных данных без паролей сотрудников.</p><button id="exportData" class="btn secondary">⬇️ Скачать экспорт</button></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hide"><div id="modalBox" class="modal-box"></div></div>
+<script src="app.js"></script>
+</body>
+</html>

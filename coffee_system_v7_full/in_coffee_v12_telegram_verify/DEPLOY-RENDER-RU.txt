@@ -1,0 +1,9 @@
+IN COFFEE v12 — TELEGRAM VERIFY
+
+1. Загрузите файлы v12 в текущую папку проекта GitHub.
+2. Render -> Environment: добавьте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME.
+3. Убедитесь, что PUBLIC_URL содержит полный адрес вашего сайта.
+4. Сделайте Deploy latest commit.
+5. В логах должна появиться строка: Telegram verification webhook configured
+
+Eskiz / SMS переменные больше не нужны.
