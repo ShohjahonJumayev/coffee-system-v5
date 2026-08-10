@@ -29,7 +29,14 @@ const PAYME_ACCOUNT_FIELD = 'order_id';
 const YANDEX_MAPS_API_KEY = String(process.env.YANDEX_MAPS_API_KEY || '').trim();
 const TELEGRAM_BOT_TOKEN = String(process.env.TELEGRAM_BOT_TOKEN || '').trim();
 const TELEGRAM_BOT_USERNAME = String(process.env.TELEGRAM_BOT_USERNAME || '').replace(/^@/, '').trim();
+const CARD_TRANSFER_NUMBER = String(process.env.CARD_TRANSFER_NUMBER || '').trim();
+const CARD_TRANSFER_HOLDER = String(process.env.CARD_TRANSFER_HOLDER || '').trim();
+const FIRST_ORDER_PROMO_CODE = String(process.env.FIRST_ORDER_PROMO_CODE || 'FIRST10').trim().toUpperCase();
+const FIRST_ORDER_PROMO_PERCENT = Number(process.env.FIRST_ORDER_PROMO_PERCENT || 10) || 10;
 const TELEGRAM_VERIFY_TTL_MINUTES = 10;
+const BUSINESS_TIMEZONE = 'Asia/Tashkent';
+const BUSINESS_OPEN_HOUR = 8;
+const BUSINESS_CLOSE_HOUR = 1;
 const TELEGRAM_WEBHOOK_SECRET = crypto.createHash('sha256').update(SESSION_SECRET || 'in-coffee').digest('hex');
 
 if (!DATABASE_URL) {
@@ -69,6 +76,47 @@ const imageUpload = multer({
 const loginLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
 const orderLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 40, standardHeaders: true, legacyHeaders: false });
 const verificationLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Слишком много запросов подтверждения. Попробуйте позже.' } });
+
+function tashkentClock(date = new Date()) {
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    timeZone: BUSINESS_TIMEZONE,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hourCycle: 'h23'
+  });
+  const parts = Object.fromEntries(fmt.formatToParts(date).filter(x => x.type !== 'literal').map(x => [x.type, x.value]));
+  return {
+    year: Number(parts.year), month: Number(parts.month), day: Number(parts.day),
+    hour: Number(parts.hour) % 24, minute: Number(parts.minute), second: Number(parts.second)
+  };
+}
+
+function onlineOrderingOpen(date = new Date()) {
+  const { hour } = tashkentClock(date);
+  return hour >= BUSINESS_OPEN_HOUR || hour < BUSINESS_CLOSE_HOUR;
+}
+
+function operationalBusinessDate(date = new Date()) {
+  const c = tashkentClock(date);
+  const d = new Date(Date.UTC(c.year, c.month - 1, c.day, 12, 0, 0));
+  if (c.hour < BUSINESS_OPEN_HOUR) d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function publicBusinessStatus() {
+  const c = tashkentClock();
+  const open = onlineOrderingOpen();
+  return {
+    open,
+    timezone: BUSINESS_TIMEZONE,
+    hours: '08:00–01:00',
+    openHour: '08:00',
+    closeHour: '01:00',
+    localTime: `${String(c.hour).padStart(2,'0')}:${String(c.minute).padStart(2,'0')}`,
+    businessDate: operationalBusinessDate(),
+    message: open ? 'Онлайн-заказы принимаются' : 'Онлайн-заказы сейчас закрыты. Откроемся в 08:00.'
+  };
+}
 
 function cookieValue(req, name) {
   const raw = req.headers.cookie || '';
@@ -208,6 +256,17 @@ async function getTelegramVerification(token, purpose) {
   if (!/^[A-Za-z0-9_-]{20,64}$/.test(value)) return null;
   const { rows } = await pool.query(`SELECT * FROM customer_telegram_verifications WHERE token=$1 AND purpose=$2`, [value,purpose]);
   return rows[0] || null;
+}
+
+async function customerFirstOrderEligible(customerId, db = pool) {
+  const q = typeof db.query === 'function' ? db : pool;
+  const { rows } = await q.query('SELECT COUNT(*)::int AS count FROM online_orders WHERE customer_id=$1', [customerId]);
+  return Number(rows[0]?.count || 0) === 0;
+}
+
+async function enrichCustomer(customer, db = pool) {
+  if (!customer?.id) return customer;
+  return { ...customer, first_order_eligible: await customerFirstOrderEligible(customer.id, db), first_order_promo_code: FIRST_ORDER_PROMO_CODE, first_order_promo_percent: FIRST_ORDER_PROMO_PERCENT };
 }
 
 async function customerAuth(req, res, next) {
@@ -426,6 +485,25 @@ async function initDb() {
         reason TEXT NOT NULL DEFAULT '',
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS cash_shifts (
+        id BIGSERIAL PRIMARY KEY,
+        branch_id INTEGER NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+        business_date DATE NOT NULL,
+        opened_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        closed_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        opened_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        closed_at TIMESTAMPTZ,
+        closing_total_sales BIGINT NOT NULL DEFAULT 0,
+        closing_cash_sales BIGINT NOT NULL DEFAULT 0,
+        closing_card_sales BIGINT NOT NULL DEFAULT 0,
+        closing_online_sales BIGINT NOT NULL DEFAULT 0,
+        closing_cash_in BIGINT NOT NULL DEFAULT 0,
+        closing_cash_out BIGINT NOT NULL DEFAULT 0,
+        closing_expenses BIGINT NOT NULL DEFAULT 0,
+        closing_net_cash BIGINT NOT NULL DEFAULT 0
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_cash_shift_per_branch ON cash_shifts(branch_id) WHERE closed_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_cash_shifts_branch_date ON cash_shifts(branch_id,business_date DESC,opened_at DESC);
       CREATE TABLE IF NOT EXISTS customer_accounts (
         id BIGSERIAL PRIMARY KEY,
         name TEXT NOT NULL,
@@ -475,6 +553,10 @@ async function initDb() {
         payment_method TEXT NOT NULL DEFAULT 'cash',
         payment_status TEXT NOT NULL DEFAULT 'unpaid',
         paid_at TIMESTAMPTZ,
+        payment_receipt_mime TEXT,
+        payment_receipt_data BYTEA,
+        payment_reviewed_at TIMESTAMPTZ,
+        payment_reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
         delivery_type TEXT NOT NULL DEFAULT 'pickup',
         delivery_address TEXT NOT NULL DEFAULT '',
         delivery_lat DOUBLE PRECISION,
@@ -515,16 +597,24 @@ async function initDb() {
     await client.query(`
       ALTER TABLE products ADD COLUMN IF NOT EXISTS image_mime TEXT;
       ALTER TABLE products ADD COLUMN IF NOT EXISTS image_data BYTEA;
+      ALTER TABLE sales ADD COLUMN IF NOT EXISTS shift_id BIGINT REFERENCES cash_shifts(id) ON DELETE SET NULL;
+      ALTER TABLE cash_operations ADD COLUMN IF NOT EXISTS shift_id BIGINT REFERENCES cash_shifts(id) ON DELETE SET NULL;
       ALTER TABLE customer_accounts ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS customer_id BIGINT REFERENCES customer_accounts(id) ON DELETE SET NULL;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_method TEXT NOT NULL DEFAULT 'cash';
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_status TEXT NOT NULL DEFAULT 'unpaid';
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMPTZ;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_receipt_mime TEXT;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_receipt_data BYTEA;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_reviewed_at TIMESTAMPTZ;
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS payment_reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_type TEXT NOT NULL DEFAULT 'pickup';
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_address TEXT NOT NULL DEFAULT '';
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_lat DOUBLE PRECISION;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_lng DOUBLE PRECISION;
       ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS delivery_comment TEXT NOT NULL DEFAULT '';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS promo_code TEXT NOT NULL DEFAULT '';
+      ALTER TABLE online_orders ADD COLUMN IF NOT EXISTS discount_amount BIGINT NOT NULL DEFAULT 0;
       CREATE INDEX IF NOT EXISTS idx_orders_customer_created ON online_orders(customer_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_customer_phone ON customer_accounts(phone);
     `);
@@ -798,10 +888,62 @@ app.put('/api/recipes/:productId', auth, allow('owner','admin'), async (req,res)
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
 });
 
+async function getOpenCashShift(branchId, db = pool, lockMode = '') {
+  const suffix = lockMode === 'update' ? ' FOR UPDATE' : lockMode === 'share' ? ' FOR SHARE' : '';
+  const { rows } = await db.query(`SELECT id,branch_id,business_date,opened_by,opened_at,closed_at FROM cash_shifts WHERE branch_id=$1 AND closed_at IS NULL ORDER BY id DESC LIMIT 1${suffix}`,[branchId]);
+  return rows[0] || null;
+}
+
+async function cashShiftSummary(shiftId, db = pool) {
+  const sales=(await db.query(`SELECT
+    COALESCE(SUM(total),0)::bigint AS total_sales,
+    COALESCE(SUM(CASE WHEN method='cash' THEN total ELSE 0 END),0)::bigint AS cash_sales,
+    COALESCE(SUM(CASE WHEN method='card' THEN total ELSE 0 END),0)::bigint AS card_sales,
+    COALESCE(SUM(CASE WHEN method='online' THEN total ELSE 0 END),0)::bigint AS online_sales,
+    COUNT(*)::int AS receipts
+    FROM sales WHERE shift_id=$1`,[shiftId])).rows[0];
+  const cash=(await db.query(`SELECT
+    COALESCE(SUM(CASE WHEN type='cash_in' THEN amount ELSE 0 END),0)::bigint AS cash_in,
+    COALESCE(SUM(CASE WHEN type='cash_out' THEN amount ELSE 0 END),0)::bigint AS cash_out
+    FROM cash_operations WHERE shift_id=$1`,[shiftId])).rows[0];
+  const totalSales=Number(sales.total_sales||0), cashSales=Number(sales.cash_sales||0), cashIn=Number(cash.cash_in||0), cashOut=Number(cash.cash_out||0);
+  return {
+    total_sales: totalSales,
+    cash_sales: cashSales,
+    card_sales: Number(sales.card_sales||0),
+    online_sales: Number(sales.online_sales||0),
+    receipts: Number(sales.receipts||0),
+    cash_in: cashIn,
+    cash_out: cashOut,
+    expenses: cashOut,
+    profit_after_expenses: totalSales - cashOut,
+    cash_balance_from_shift: cashSales + cashIn - cashOut
+  };
+}
+
+async function businessDaySummary(branchId, businessDate, db = pool) {
+  const { rows } = await db.query('SELECT id FROM cash_shifts WHERE branch_id=$1 AND business_date=$2 ORDER BY id',[branchId,businessDate]);
+  if(!rows.length) return {total_sales:0,cash_sales:0,card_sales:0,online_sales:0,receipts:0,cash_in:0,cash_out:0,expenses:0,profit_after_expenses:0,cash_balance_from_shift:0};
+  const ids=rows.map(x=>Number(x.id));
+  const sales=(await db.query(`SELECT
+    COALESCE(SUM(total),0)::bigint AS total_sales,
+    COALESCE(SUM(CASE WHEN method='cash' THEN total ELSE 0 END),0)::bigint AS cash_sales,
+    COALESCE(SUM(CASE WHEN method='card' THEN total ELSE 0 END),0)::bigint AS card_sales,
+    COALESCE(SUM(CASE WHEN method='online' THEN total ELSE 0 END),0)::bigint AS online_sales,
+    COUNT(*)::int AS receipts FROM sales WHERE shift_id=ANY($1::bigint[])`,[ids])).rows[0];
+  const cash=(await db.query(`SELECT
+    COALESCE(SUM(CASE WHEN type='cash_in' THEN amount ELSE 0 END),0)::bigint AS cash_in,
+    COALESCE(SUM(CASE WHEN type='cash_out' THEN amount ELSE 0 END),0)::bigint AS cash_out FROM cash_operations WHERE shift_id=ANY($1::bigint[])`,[ids])).rows[0];
+  const totalSales=Number(sales.total_sales||0), cashSales=Number(sales.cash_sales||0), cashIn=Number(cash.cash_in||0), cashOut=Number(cash.cash_out||0);
+  return {total_sales:totalSales,cash_sales:cashSales,card_sales:Number(sales.card_sales||0),online_sales:Number(sales.online_sales||0),receipts:Number(sales.receipts||0),cash_in:cashIn,cash_out:cashOut,expenses:cashOut,profit_after_expenses:totalSales-cashOut,cash_balance_from_shift:cashSales+cashIn-cashOut};
+}
+
 async function createSale({branchId,userId,method,items,source='pos',fixedItems=null}){
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
+    const shift=await getOpenCashShift(branchId,client,'share');
+    if(!shift) throw Object.assign(new Error('Касса закрыта. Сначала откройте смену'),{status:400});
     const inputItems = fixedItems || items;
     const ids=inputItems.map(x=>Number(x.productId)).filter(Boolean);
     if(!ids.length) throw Object.assign(new Error('Выберите товар'),{status:400});
@@ -834,7 +976,7 @@ async function createSale({branchId,userId,method,items,source='pos',fixedItems=
     for(const [,n] of need){
       if(n.stock < n.amount) throw Object.assign(new Error(`Недостаточно на складе: ${n.name} (нужно ${n.amount} ${n.unit})`),{status:400});
     }
-    const sale=(await client.query('INSERT INTO sales(branch_id,user_id,method,total,source) VALUES($1,$2,$3,$4,$5) RETURNING id,created_at',[branchId,userId||null,method,total,source])).rows[0];
+    const sale=(await client.query('INSERT INTO sales(branch_id,user_id,method,total,source,shift_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,created_at',[branchId,userId||null,method,total,source,shift.id])).rows[0];
     for(const [inventoryId,n] of need){
       await client.query('UPDATE inventory_items SET quantity=quantity-$1 WHERE id=$2 AND branch_id=$3',[n.amount,inventoryId,branchId]);
       await client.query(`INSERT INTO inventory_movements(branch_id,inventory_item_id,item_name_snapshot,type,quantity,reason,sale_id,user_id) VALUES($1,$2,$3,'sale',$4,$5,$6,$7)`,[branchId,inventoryId,n.name,n.amount,`Продажа №${sale.id}`,sale.id,userId||null]);
@@ -861,8 +1003,63 @@ app.post('/api/cash', auth, async (req,res)=>{
   if(!['cash_in','cash_out'].includes(type) || !amount || amount<=0) return res.status(400).json({error:'Некорректная сумма'});
   if(type==='cash_out' && req.user.role==='cashier') return res.status(403).json({error:'Изъятие денег доступно владельцу или администратору'});
   if(type==='cash_out' && !reason) return res.status(400).json({error:'Укажите причину расхода'});
-  await pool.query('INSERT INTO cash_operations(branch_id,user_id,type,amount,reason) VALUES($1,$2,$3,$4,$5)',[branchId,req.user.id,type,amount,reason]);
-  res.json({ok:true});
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const shift=await getOpenCashShift(branchId,client,'share');
+    if(!shift){await client.query('ROLLBACK');return res.status(400).json({error:'Касса закрыта. Сначала откройте смену'});}
+    await client.query('INSERT INTO cash_operations(branch_id,user_id,type,amount,reason,shift_id) VALUES($1,$2,$3,$4,$5,$6)',[branchId,req.user.id,type,amount,reason,shift.id]);
+    await client.query('COMMIT');
+    res.json({ok:true});
+  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release()}
+});
+
+app.get('/api/cash-shift', auth, async (req,res)=>{
+  const branchId=await resolveBranch(req), businessDate=operationalBusinessDate();
+  const openShift=await getOpenCashShift(branchId);
+  const openSummary=openShift?await cashShiftSummary(openShift.id):null;
+  const today=await businessDaySummary(branchId,businessDate);
+  const lastClosed=(await pool.query(`SELECT id,business_date,opened_at,closed_at,closing_total_sales,closing_cash_sales,closing_card_sales,closing_online_sales,closing_cash_in,closing_cash_out,closing_expenses,closing_net_cash
+    FROM cash_shifts WHERE branch_id=$1 AND closed_at IS NOT NULL ORDER BY closed_at DESC LIMIT 1`,[branchId])).rows[0]||null;
+  res.json({open:Boolean(openShift),shift:openShift?{...openShift,summary:openSummary}:null,businessDate,today,lastClosed});
+});
+
+app.post('/api/cash-shift/open', auth, async (req,res)=>{
+  const branchId=await resolveBranch(req), businessDate=operationalBusinessDate();
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const exists=await getOpenCashShift(branchId,client,'update');
+    if(exists){await client.query('ROLLBACK');return res.status(409).json({error:'Касса уже открыта'});}
+    const {rows}=await client.query('INSERT INTO cash_shifts(branch_id,business_date,opened_by) VALUES($1,$2,$3) RETURNING id,branch_id,business_date,opened_at',[branchId,businessDate,req.user.id]);
+    await client.query('COMMIT');
+    res.json({ok:true,shift:rows[0],summary:await cashShiftSummary(rows[0].id)});
+  }catch(e){
+    await client.query('ROLLBACK');
+    if(e.code==='23505') return res.status(409).json({error:'Касса уже открыта'});
+    throw e;
+  }finally{client.release()}
+});
+
+app.post('/api/cash-shift/close', auth, async (req,res)=>{
+  const branchId=await resolveBranch(req);
+  const client=await pool.connect();
+  try{
+    await client.query('BEGIN');
+    const shift=await getOpenCashShift(branchId,client,'update');
+    if(!shift){await client.query('ROLLBACK');return res.status(400).json({error:'Касса уже закрыта'});}
+    const summary=await cashShiftSummary(shift.id,client);
+    const {rows}=await client.query(`UPDATE cash_shifts SET closed_at=NOW(),closed_by=$1,
+      closing_total_sales=$2,closing_cash_sales=$3,closing_card_sales=$4,closing_online_sales=$5,
+      closing_cash_in=$6,closing_cash_out=$7,closing_expenses=$8,closing_net_cash=$9
+      WHERE id=$10 RETURNING id,business_date,opened_at,closed_at`,[
+        req.user.id,summary.total_sales,summary.cash_sales,summary.card_sales,summary.online_sales,
+        summary.cash_in,summary.cash_out,summary.expenses,summary.cash_balance_from_shift,shift.id
+      ]);
+    await client.query('COMMIT');
+    const today=await businessDaySummary(branchId,String(shift.business_date).slice(0,10));
+    res.json({ok:true,shift:rows[0],summary,today});
+  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release()}
 });
 
 app.get('/api/dashboard', auth, async (req,res)=>{
@@ -936,16 +1133,44 @@ app.get('/api/expenses', auth, allow('owner','admin'), async (req,res)=>{
 
 app.get('/api/orders', auth, async (req,res)=>{
   const branchId=await resolveBranch(req);
-  const {rows}=await pool.query('SELECT id,customer_name,customer_phone,status,total,payment_method,payment_status,paid_at,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at FROM online_orders WHERE branch_id=$1 ORDER BY created_at DESC LIMIT 100',[branchId]);
+  const {rows}=await pool.query('SELECT id,customer_name,customer_phone,status,total,promo_code,discount_amount,payment_method,payment_status,paid_at,(payment_receipt_data IS NOT NULL) AS has_payment_receipt,payment_reviewed_at,payment_reviewed_by,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at FROM online_orders WHERE branch_id=$1 ORDER BY created_at DESC LIMIT 100',[branchId]);
   res.json(rows);
 });
 
 app.get('/api/orders/:id', auth, async (req,res)=>{
   const branchId=await resolveBranch(req), id=Number(req.params.id);
-  const {rows}=await pool.query('SELECT * FROM online_orders WHERE id=$1 AND branch_id=$2',[id,branchId]);
+  const {rows}=await pool.query(`SELECT id,branch_id,customer_id,customer_name,customer_phone,status,total,payment_method,payment_status,paid_at,
+    (payment_receipt_data IS NOT NULL) AS has_payment_receipt,payment_reviewed_at,payment_reviewed_by,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at
+    FROM online_orders WHERE id=$1 AND branch_id=$2`,[id,branchId]);
   if(!rows[0]) return res.status(404).json({error:'Заказ не найден'});
   const items=(await pool.query('SELECT product_id,name_snapshot AS name,price,quantity FROM online_order_items WHERE order_id=$1 ORDER BY id',[id])).rows;
   res.json({...rows[0],items});
+});
+
+app.get('/api/orders/:id/receipt', auth, async (req,res)=>{
+  const branchId=await resolveBranch(req), id=Number(req.params.id);
+  const {rows}=await pool.query('SELECT payment_receipt_mime,payment_receipt_data FROM online_orders WHERE id=$1 AND branch_id=$2',[id,branchId]);
+  const o=rows[0];
+  if(!o || !o.payment_receipt_data) return res.status(404).json({error:'Чек не найден'});
+  res.setHeader('Content-Type',o.payment_receipt_mime||'image/jpeg');
+  res.setHeader('Cache-Control','private, no-store');
+  res.send(o.payment_receipt_data);
+});
+
+app.put('/api/orders/:id/payment-review', auth, allow('owner','admin'), async (req,res)=>{
+  const branchId=await resolveBranch(req), id=Number(req.params.id), action=String(req.body.action||'');
+  if(!['approve','reject'].includes(action)) return res.status(400).json({error:'Некорректное действие'});
+  const order=(await pool.query('SELECT id,status,payment_method,payment_status,(payment_receipt_data IS NOT NULL) AS has_receipt FROM online_orders WHERE id=$1 AND branch_id=$2',[id,branchId])).rows[0];
+  if(!order) return res.status(404).json({error:'Заказ не найден'});
+  if(order.payment_method!=='receipt') return res.status(400).json({error:'У этого заказа нет оплаты по чеку'});
+  if(!order.has_receipt) return res.status(400).json({error:'Чек не загружен'});
+  if(order.status==='completed') return res.status(400).json({error:'Заказ уже завершён'});
+  if(action==='approve'){
+    await pool.query("UPDATE online_orders SET payment_status='paid',paid_at=NOW(),payment_reviewed_at=NOW(),payment_reviewed_by=$1 WHERE id=$2 AND branch_id=$3",[req.user.id,id,branchId]);
+    return res.json({ok:true,paymentStatus:'paid'});
+  }
+  await pool.query("UPDATE online_orders SET payment_status='rejected',paid_at=NULL,payment_reviewed_at=NOW(),payment_reviewed_by=$1 WHERE id=$2 AND branch_id=$3",[req.user.id,id,branchId]);
+  res.json({ok:true,paymentStatus:'rejected'});
 });
 
 app.put('/api/orders/:id/status', auth, async (req,res)=>{
@@ -960,15 +1185,19 @@ app.put('/api/orders/:id/status', auth, async (req,res)=>{
     if(order.payment_method==='payme'){
       if(order.payment_status!=='paid') return res.status(400).json({error:'Онлайн-оплата ещё не подтверждена'});
       method='online';
+    }else if(order.payment_method==='receipt'){
+      if(order.payment_status!=='paid') return res.status(400).json({error:'Сначала подтвердите оплату по чеку'});
+      method='card';
     }else if(!['cash','card'].includes(method)) return res.status(400).json({error:'Выберите способ оплаты'});
     const orderItems=(await pool.query('SELECT product_id AS "productId",name_snapshot AS name,price,quantity FROM online_order_items WHERE order_id=$1',[id])).rows;
     try{
       const sale=await createSale({branchId,userId:req.user.id,method,items:[],fixedItems:orderItems,source:`online_order:${id}`});
-      await pool.query("UPDATE online_orders SET status='completed',payment_status='paid',paid_at=COALESCE(paid_at,NOW()),payment_method=CASE WHEN payment_method='payme' THEN payment_method ELSE $3 END WHERE id=$1 AND branch_id=$2",[id,branchId,method]);
+      await pool.query("UPDATE online_orders SET status='completed',payment_status='paid',paid_at=COALESCE(paid_at,NOW()),payment_method=CASE WHEN payment_method IN ('payme','receipt') THEN payment_method ELSE $3 END WHERE id=$1 AND branch_id=$2",[id,branchId,method]);
       return res.json({ok:true,sale});
     }catch(e){return res.status(e.status||500).json({error:e.message||'Не удалось завершить заказ'});}
   }
   if(order.status==='completed') return res.status(400).json({error:'Завершённый заказ нельзя изменить'});
+  if(order.payment_method==='receipt' && ['accepted','ready'].includes(status) && order.payment_status!=='paid') return res.status(400).json({error:'Сначала подтвердите оплату по чеку'});
   await pool.query('UPDATE online_orders SET status=$1 WHERE id=$2 AND branch_id=$3',[status,id,branchId]);
   res.json({ok:true});
 });
@@ -1078,7 +1307,7 @@ app.get('/api/customer/register/status', verificationLimiter, async (req,res)=>{
   if(!record.verified) return res.json({ok:true,verified:false});
   if(record.customer_id){
     const customer=(await pool.query('SELECT id,name,phone,phone_verified,created_at FROM customer_accounts WHERE id=$1',[record.customer_id])).rows[0];
-    if(customer){ setCustomerCookie(res,signCustomer(customer)); return res.json({ok:true,verified:true,customer}); }
+    if(customer){ const customerView=await enrichCustomer(customer); setCustomerCookie(res,signCustomer(customer)); return res.json({ok:true,verified:true,customer:customerView}); }
   }
   const payload=record.payload||{};
   const name=String(payload.name||'').trim().slice(0,80), passwordHash=String(payload.passwordHash||'');
@@ -1091,14 +1320,15 @@ app.get('/api/customer/register/status', verificationLimiter, async (req,res)=>{
     if(locked.customer_id){
       const customer=(await client.query('SELECT id,name,phone,phone_verified,created_at FROM customer_accounts WHERE id=$1',[locked.customer_id])).rows[0];
       await client.query('COMMIT');
-      if(customer){ setCustomerCookie(res,signCustomer(customer)); return res.json({ok:true,verified:true,customer}); }
+      if(customer){ const customerView=await enrichCustomer(customer); setCustomerCookie(res,signCustomer(customer)); return res.json({ok:true,verified:true,customer:customerView}); }
     }
     const {rows}=await client.query('INSERT INTO customer_accounts(name,phone,password_hash,phone_verified) VALUES($1,$2,$3,true) RETURNING id,name,phone,phone_verified,created_at',[name,record.phone,passwordHash]);
     const customer=rows[0];
     await client.query('UPDATE customer_telegram_verifications SET customer_id=$1,updated_at=NOW() WHERE token=$2',[customer.id,token]);
     await client.query('COMMIT');
+    const customerView=await enrichCustomer(customer, client);
     setCustomerCookie(res,signCustomer(customer));
-    res.json({ok:true,verified:true,customer});
+    res.json({ok:true,verified:true,customer:customerView});
   }catch(e){
     await client.query('ROLLBACK');
     if(e.code==='23505') return res.status(400).json({error:'Аккаунт с таким номером уже существует'});
@@ -1113,8 +1343,9 @@ app.post('/api/customer/login', loginLimiter, async (req,res)=>{
   const {rows}=await pool.query('SELECT id,name,phone,password_hash,phone_verified,active,created_at FROM customer_accounts WHERE phone=$1',[phone]);
   const customer=rows[0];
   if(!customer||!customer.active||!verifyPassword(password,customer.password_hash)) return res.status(401).json({error:'Неверный номер телефона или пароль'});
+  const customerView=await enrichCustomer({id:customer.id,name:customer.name,phone:customer.phone,phone_verified:customer.phone_verified,created_at:customer.created_at});
   setCustomerCookie(res,signCustomer(customer));
-  res.json({ok:true,customer:{id:customer.id,name:customer.name,phone:customer.phone,phone_verified:customer.phone_verified,created_at:customer.created_at}});
+  res.json({ok:true,customer:customerView});
 });
 
 app.post('/api/customer/verification/send', customerAuth, verificationLimiter, async (req,res)=>{
@@ -1126,7 +1357,7 @@ app.post('/api/customer/verification/send', customerAuth, verificationLimiter, a
 });
 
 app.get('/api/customer/verification/status', customerAuth, verificationLimiter, async (req,res)=>{
-  if(req.customer.phone_verified) return res.json({ok:true,verified:true,customer:req.customer});
+  if(req.customer.phone_verified) return res.json({ok:true,verified:true,customer:await enrichCustomer(req.customer)});
   const token=String(req.query.token||'');
   const record=await getTelegramVerification(token,'verify_existing');
   if(!record||Number(record.customer_id)!==Number(req.customer.id)) return res.status(404).json({error:'Ссылка подтверждения не найдена'});
@@ -1134,20 +1365,20 @@ app.get('/api/customer/verification/status', customerAuth, verificationLimiter, 
   if(!record.verified) return res.json({ok:true,verified:false});
   const {rows}=await pool.query('UPDATE customer_accounts SET phone_verified=true,updated_at=NOW() WHERE id=$1 RETURNING id,name,phone,phone_verified,active,created_at',[req.customer.id]);
   await pool.query('DELETE FROM customer_telegram_verifications WHERE token=$1',[token]);
-  res.json({ok:true,verified:true,customer:rows[0]});
+  res.json({ok:true,verified:true,customer:await enrichCustomer(rows[0])});
 });
 
 app.post('/api/customer/logout',(req,res)=>{clearCustomerCookie(res);res.json({ok:true})});
 
 app.get('/api/customer/me',customerAuth,async(req,res)=>{
-  res.json({customer:req.customer});
+  res.json({customer:await enrichCustomer(req.customer)});
 });
 
 app.put('/api/customer/me',customerAuth,async(req,res)=>{
   const name=String(req.body.name||'').trim().slice(0,80);
   if(!name) return res.status(400).json({error:'Введите имя'});
   const {rows}=await pool.query('UPDATE customer_accounts SET name=$1,updated_at=NOW() WHERE id=$2 RETURNING id,name,phone,phone_verified,created_at',[name,req.customer.id]);
-  res.json({ok:true,customer:rows[0]});
+  res.json({ok:true,customer:await enrichCustomer(rows[0])});
 });
 
 app.post('/api/customer/password',customerAuth,async(req,res)=>{
@@ -1160,7 +1391,7 @@ app.post('/api/customer/password',customerAuth,async(req,res)=>{
 });
 
 app.get('/api/customer/orders',customerAuth,async(req,res)=>{
-  const {rows:orders}=await pool.query(`SELECT o.id,o.branch_id,b.name AS branch_name,o.status,o.total,o.payment_method,o.payment_status,o.paid_at,o.delivery_type,o.delivery_address,o.delivery_comment,o.created_at
+  const {rows:orders}=await pool.query(`SELECT o.id,o.branch_id,b.name AS branch_name,o.status,o.total,o.promo_code,o.discount_amount,o.payment_method,o.payment_status,o.paid_at,(o.payment_receipt_data IS NOT NULL) AS has_payment_receipt,o.delivery_type,o.delivery_address,o.delivery_comment,o.created_at
     FROM online_orders o LEFT JOIN branches b ON b.id=o.branch_id WHERE o.customer_id=$1 ORDER BY o.created_at DESC LIMIT 100`,[req.customer.id]);
   if(!orders.length) return res.json([]);
   const ids=orders.map(o=>Number(o.id));
@@ -1178,11 +1409,10 @@ app.get('/api/customers',auth,allow('owner','admin'),async(req,res)=>{
 
 app.get('/api/payment-settings', auth, async (req,res)=>{
   res.json({
-    provider:'Payme',
-    configured:paymeConfigured(),
-    mode:PAYME_TEST_MODE?'test':'production',
-    merchantApiEndpoint:`${originFor(req)}/api/payme`,
-    accountField:PAYME_ACCOUNT_FIELD
+    provider:'Card transfer + receipt',
+    configured:Boolean(CARD_TRANSFER_NUMBER),
+    cardNumber:CARD_TRANSFER_NUMBER,
+    cardHolder:CARD_TRANSFER_HOLDER
   });
 });
 
@@ -1190,8 +1420,10 @@ app.get('/api/public/verification-config', async (req,res)=>{
   res.json({provider:'Telegram',enabled:telegramConfigured(),botUsername:TELEGRAM_BOT_USERNAME,ttlMinutes:TELEGRAM_VERIFY_TTL_MINUTES});
 });
 
+app.get('/api/public/business-status', async (req,res)=>{ res.json(publicBusinessStatus()); });
+
 app.get('/api/public/payment-config', async (req,res)=>{
-  res.json({provider:'Payme',enabled:paymeConfigured(),mode:PAYME_TEST_MODE?'test':'production'});
+  res.json({provider:'receipt',enabled:Boolean(CARD_TRANSFER_NUMBER),cardNumber:CARD_TRANSFER_NUMBER,cardHolder:CARD_TRANSFER_HOLDER,promoCode:FIRST_ORDER_PROMO_CODE,promoPercent:FIRST_ORDER_PROMO_PERCENT});
 });
 
 app.get('/api/public/branches' , async (req,res)=>{
@@ -1212,9 +1444,12 @@ app.get('/api/public/products', async (req,res)=>{
   res.json((await pool.query(`SELECT ${productSelect()} FROM products WHERE active=true ORDER BY category,name`)).rows);
 });
 
-app.post('/api/public/orders', customerAuth, orderLimiter, async (req,res)=>{
+app.post('/api/public/orders', customerAuth, orderLimiter, imageUpload.single('receipt'), async (req,res)=>{
+  if(!onlineOrderingOpen()) return res.status(403).json({error:'Онлайн-заказы принимаются с 08:00 до 01:00 по времени Узбекистана'});
   if(!req.customer.phone_verified) return res.status(403).json({error:'Подтвердите номер телефона через Telegram перед заказом'});
-  const branchId=Number(req.body.branchId), customerName=req.customer.name, customerPhone=req.customer.phone, items=Array.isArray(req.body.items)?req.body.items:[];
+  let parsedItems=req.body.items;
+  if(typeof parsedItems==='string'){try{parsedItems=JSON.parse(parsedItems)}catch{parsedItems=[]}}
+  const branchId=Number(req.body.branchId), customerName=req.customer.name, customerPhone=req.customer.phone, items=Array.isArray(parsedItems)?parsedItems:[];
   const deliveryType=String(req.body.deliveryType||'pickup');
   const deliveryAddress=String(req.body.deliveryAddress||'').trim().slice(0,220);
   const deliveryComment=String(req.body.deliveryComment||'').trim().slice(0,300);
@@ -1223,32 +1458,44 @@ app.post('/api/public/orders', customerAuth, orderLimiter, async (req,res)=>{
   const rawLat=hasLat?Number(req.body.deliveryLat):NaN, rawLng=hasLng?Number(req.body.deliveryLng):NaN;
   const deliveryLat=Number.isFinite(rawLat)&&rawLat>=-90&&rawLat<=90?rawLat:null;
   const deliveryLng=Number.isFinite(rawLng)&&rawLng>=-180&&rawLng<=180?rawLng:null;
-  const paymentMethod=String(req.body.paymentMethod||'cash');
-  if(!['cash','payme'].includes(paymentMethod)) return res.status(400).json({error:'Некорректный способ оплаты'});
+  const paymentMethod=String(req.body.paymentMethod||'receipt');
+  const promoCode=String(req.body.promoCode||'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,32);
+  if(paymentMethod!=='receipt') return res.status(400).json({error:'Для онлайн-заказа доступна только оплата переводом на карту'});
   if(!['pickup','delivery'].includes(deliveryType)) return res.status(400).json({error:'Некорректный способ получения'});
   if(deliveryType==='delivery' && !deliveryAddress) return res.status(400).json({error:'Укажите адрес доставки'});
-  if(paymentMethod==='payme' && !paymeConfigured()) return res.status(400).json({error:'Онлайн-оплата Payme пока не подключена'});
+  if(!CARD_TRANSFER_NUMBER) return res.status(400).json({error:'Оплата переводом пока не настроена'});
+  if(!req.file) return res.status(400).json({error:'Загрузите чек оплаты'});
   if(!branchId || !items.length) return res.status(400).json({error:'Выберите филиал и товары'});
   const branch=(await pool.query('SELECT id FROM branches WHERE id=$1 AND active=true',[branchId])).rows[0];
   if(!branch) return res.status(400).json({error:'Филиал недоступен'});
   const ids=items.map(x=>Number(x.productId)).filter(Boolean);
   const {rows:products}=await pool.query('SELECT id,name,price FROM products WHERE active=true AND id=ANY($1::int[])',[ids]);
   const map=new Map(products.map(p=>[Number(p.id),p]));
-  const normalized=[]; let total=0;
+  const normalized=[]; let subtotal=0;
   for(const raw of items){
     const p=map.get(Number(raw.productId)); const quantity=Math.min(20,Math.max(1,Math.floor(Number(raw.quantity)||1)));
     if(!p) return res.status(400).json({error:'Один из товаров недоступен'});
-    total += Number(p.price)*quantity; normalized.push({p,quantity});
+    subtotal += Number(p.price)*quantity; normalized.push({p,quantity});
   }
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
-    const paymentStatus=paymentMethod==='payme'?'pending':'unpaid';
-    const order=(await client.query('INSERT INTO online_orders(branch_id,customer_id,customer_name,customer_phone,total,payment_method,payment_status,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id,total,status,payment_method,payment_status,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at',[branchId,req.customer.id,customerName,customerPhone,total,paymentMethod,paymentStatus,deliveryType,deliveryType==='delivery'?deliveryAddress:'',deliveryType==='delivery'?deliveryLat:null,deliveryType==='delivery'?deliveryLng:null,deliveryType==='delivery'?deliveryComment:''])).rows[0];
+    let discountAmount = 0;
+    let approvedPromoCode = '';
+    if(promoCode){
+      if(promoCode !== FIRST_ORDER_PROMO_CODE) { await client.query('ROLLBACK'); return res.status(400).json({error:`Неверный промокод. Используйте ${FIRST_ORDER_PROMO_CODE}`}); }
+      const eligible = await customerFirstOrderEligible(req.customer.id, client);
+      if(!eligible) { await client.query('ROLLBACK'); return res.status(400).json({error:`Промокод ${FIRST_ORDER_PROMO_CODE} действует только на первый заказ`}); }
+      discountAmount = Math.max(0, Math.round(subtotal * FIRST_ORDER_PROMO_PERCENT / 100));
+      approvedPromoCode = FIRST_ORDER_PROMO_CODE;
+    }
+    const total = Math.max(0, subtotal - discountAmount);
+    const paymentStatus=paymentMethod==='receipt'?'review':'unpaid';
+    const order=(await client.query('INSERT INTO online_orders(branch_id,customer_id,customer_name,customer_phone,total,promo_code,discount_amount,payment_method,payment_status,payment_receipt_mime,payment_receipt_data,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id,total,promo_code,discount_amount,status,payment_method,payment_status,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at',[branchId,req.customer.id,customerName,customerPhone,total,approvedPromoCode,discountAmount,paymentMethod,paymentStatus,paymentMethod==='receipt'?req.file.mimetype:null,paymentMethod==='receipt'?req.file.buffer:null,deliveryType,deliveryType==='delivery'?deliveryAddress:'',deliveryType==='delivery'?deliveryLat:null,deliveryType==='delivery'?deliveryLng:null,deliveryType==='delivery'?deliveryComment:''])).rows[0];
+    order.subtotal = subtotal;
     for(const item of normalized) await client.query('INSERT INTO online_order_items(order_id,product_id,name_snapshot,price,quantity) VALUES($1,$2,$3,$4,$5)',[order.id,item.p.id,item.p.name,item.p.price,item.quantity]);
     await client.query('COMMIT');
-    const paymentUrl=paymentMethod==='payme'?paymeCheckoutUrl(order.id,total,branchId,req):null;
-    res.json({ok:true,order,paymentUrl});
+    res.json({ok:true,order});
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
 });
 
@@ -1361,7 +1608,7 @@ app.post('/api/payme', async (req,res)=>{
 
 app.get('/api/export' , auth, allow('owner','admin'), async (req,res)=>{
   const branchId=req.user.role==='owner' ? null : await resolveBranch(req);
-  const data={exportedAt:new Date().toISOString(),version:'10.0.0',brand:'In coffee'};
+  const data={exportedAt:new Date().toISOString(),version:'13.0.0',brand:'In coffee'};
   if(branchId){
     data.branches=(await pool.query('SELECT id,name,address,active,created_at FROM branches WHERE id=$1',[branchId])).rows;
     data.users=(await pool.query('SELECT id,username,name,role,branch_id,active,created_at FROM users WHERE branch_id=$1',[branchId])).rows;
@@ -1371,7 +1618,7 @@ app.get('/api/export' , auth, allow('owner','admin'), async (req,res)=>{
     data.sales=(await pool.query('SELECT * FROM sales WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
     data.saleItems=(await pool.query('SELECT si.* FROM sale_items si JOIN sales s ON s.id=si.sale_id WHERE s.branch_id=$1 ORDER BY si.id',[branchId])).rows;
     data.cashOperations=(await pool.query('SELECT * FROM cash_operations WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
-    data.onlineOrders=(await pool.query('SELECT * FROM online_orders WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
+    data.onlineOrders=(await pool.query('SELECT id,branch_id,customer_id,customer_name,customer_phone,status,total,promo_code,discount_amount,payment_method,payment_status,paid_at,(payment_receipt_data IS NOT NULL) AS has_payment_receipt,payment_reviewed_at,payment_reviewed_by,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at FROM online_orders WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
     data.onlineOrderItems=(await pool.query('SELECT oi.* FROM online_order_items oi JOIN online_orders o ON o.id=oi.order_id WHERE o.branch_id=$1 ORDER BY oi.id',[branchId])).rows;
     data.inventoryMovements=(await pool.query('SELECT * FROM inventory_movements WHERE branch_id=$1 ORDER BY id',[branchId])).rows;
     data.customerAccounts=(await pool.query('SELECT id,name,phone,active,created_at,updated_at FROM customer_accounts ORDER BY id')).rows;
@@ -1384,7 +1631,7 @@ app.get('/api/export' , auth, allow('owner','admin'), async (req,res)=>{
     data.sales=(await pool.query('SELECT * FROM sales ORDER BY id')).rows;
     data.saleItems=(await pool.query('SELECT * FROM sale_items ORDER BY id')).rows;
     data.cashOperations=(await pool.query('SELECT * FROM cash_operations ORDER BY id')).rows;
-    data.onlineOrders=(await pool.query('SELECT * FROM online_orders ORDER BY id')).rows;
+    data.onlineOrders=(await pool.query('SELECT id,branch_id,customer_id,customer_name,customer_phone,status,total,promo_code,discount_amount,payment_method,payment_status,paid_at,(payment_receipt_data IS NOT NULL) AS has_payment_receipt,payment_reviewed_at,payment_reviewed_by,delivery_type,delivery_address,delivery_lat,delivery_lng,delivery_comment,created_at FROM online_orders ORDER BY id')).rows;
     data.onlineOrderItems=(await pool.query('SELECT * FROM online_order_items ORDER BY id')).rows;
     data.inventoryMovements=(await pool.query('SELECT * FROM inventory_movements ORDER BY id')).rows;
     data.customerAccounts=(await pool.query('SELECT id,name,phone,active,created_at,updated_at FROM customer_accounts ORDER BY id')).rows;
@@ -1396,7 +1643,7 @@ app.get('/api/export' , auth, allow('owner','admin'), async (req,res)=>{
 });
 
 app.use((err, req, res, next) => {
-  if (err instanceof multer.MulterError) return res.status(400).json({error: err.code==='LIMIT_FILE_SIZE'?'Фото слишком большое (максимум 3 МБ)':'Ошибка загрузки фото'});
+  if (err instanceof multer.MulterError) return res.status(400).json({error: err.code==='LIMIT_FILE_SIZE'?'Файл слишком большой (максимум 3 МБ)':'Ошибка загрузки файла'});
   console.error(err);
   if (res.headersSent) return next(err);
   res.status(500).json({ error: 'Внутренняя ошибка сервера' });
@@ -1404,7 +1651,7 @@ app.use((err, req, res, next) => {
 
 initDb().then(() => {
   app.listen(PORT, HOST, async () => {
-    console.log(`In coffee v12: http://${HOST}:${PORT}`);
+    console.log(`In coffee v13: http://${HOST}:${PORT}`);
     await setupTelegramWebhook();
   });
 }).catch(err => {

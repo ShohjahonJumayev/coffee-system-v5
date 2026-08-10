@@ -1,9 +1,14 @@
-IN COFFEE v12 — TELEGRAM VERIFY
+IN COFFEE v13 — CARD TRANSFER + RECEIPT
 
-1. Загрузите файлы v12 в текущую папку проекта GitHub.
-2. Render -> Environment: добавьте TELEGRAM_BOT_TOKEN и TELEGRAM_BOT_USERNAME.
-3. Убедитесь, что PUBLIC_URL содержит полный адрес вашего сайта.
-4. Сделайте Deploy latest commit.
-5. В логах должна появиться строка: Telegram verification webhook configured
+1. Загрузите содержимое v13 в текущую папку проекта GitHub.
+2. Render -> Environment: добавьте CARD_TRANSFER_NUMBER.
+3. Добавьте CARD_TRANSFER_HOLDER.
+4. Старые TELEGRAM_BOT_TOKEN / TELEGRAM_BOT_USERNAME и остальные переменные не удаляйте.
+5. Сделайте Deploy latest commit или дождитесь автоматического Deploy.
+6. После статуса Live откройте QR-меню и проверьте «Перевод на карту».
 
-Eskiz / SMS переменные больше не нужны.
+Тест:
+- клиент выбирает перевод на карту;
+- загружает чек;
+- заказ появляется как «Чек на проверке»;
+- в админке откройте заказ -> посмотрите чек -> подтвердите или отклоните.

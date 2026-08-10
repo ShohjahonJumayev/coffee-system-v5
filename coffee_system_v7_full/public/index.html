@@ -27,7 +27,7 @@
   <aside id="sidebar" class="sidebar">
     <div class="brand">
       <div class="brand-icon">☕</div>
-      <div><b>In coffee</b><small>v10</small></div>
+      <div><b>In coffee</b><small>v13.7</small></div>
     </div>
     <nav id="nav" class="nav">
       <button data-page="dashboard" data-roles="owner,admin,cashier" class="active">📊 <span>Главная</span></button>
@@ -87,7 +87,19 @@
     </section>
 
     <section id="page-cash" class="page hide">
-      <div class="page-head"><div><h1>Касса</h1><p class="muted">Нажимай на товары, чтобы добавить их в чек.</p></div><div class="pill">Позиций: <b id="cartCount">0</b></div></div>
+      <div class="page-head"><div><h1>Касса</h1><p class="muted">Открой смену перед продажами и закрой её в конце рабочего дня.</p></div><div class="pill">Позиций: <b id="cartCount">0</b></div></div>
+      <div class="card shift-card">
+        <div class="shift-head"><div><span id="shiftBadge" class="status cancelled">Касса закрыта</span><h2 id="shiftTitle">Смена не открыта</h2><p id="shiftMeta" class="muted">Откройте кассу, чтобы начать продажи.</p></div><div class="shift-actions"><button id="openShift" class="btn success">🔓 Открыть кассу</button><button id="closeShift" class="btn danger hide">🔒 Закрыть кассу</button></div></div>
+        <div class="shift-stats">
+          <div><span>Продажи сегодня</span><strong id="shiftTodaySales">0 сум</strong></div>
+          <div><span>Наличные</span><strong id="shiftCashSales">0 сум</strong></div>
+          <div><span>Карта</span><strong id="shiftCardSales">0 сум</strong></div>
+          <div><span>Онлайн</span><strong id="shiftOnlineSales">0 сум</strong></div>
+          <div><span>Расходы</span><strong id="shiftExpenses">0 сум</strong></div>
+          <div class="shift-profit"><span>После расходов</span><strong id="shiftProfit">0 сум</strong></div>
+        </div>
+        <div id="lastShiftInfo" class="shift-last muted"></div>
+      </div>
       <div class="pos-layout">
         <div class="card"><div class="card-title"><h2>Товары</h2><input id="productSearch" class="input compact" placeholder="Поиск товара"></div><div id="posProducts" class="product-grid"></div></div>
         <div class="card receipt-panel"><div class="card-title"><h2>Текущий чек</h2><button id="clearCart" class="text-btn">Очистить</button></div><div id="cartList" class="list grow"></div><div class="checkout"><div class="checkout-total"><span>Итого</span><strong><span id="cartTotal">0</span> сум</strong></div><div class="pay-grid"><button id="cashPay" class="btn success">💵 Наличные</button><button id="cardPay" class="btn primary">💳 Карта</button></div></div></div>
