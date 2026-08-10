@@ -5,6 +5,48 @@ let branches=[],products=[],cart=[],category='Все',paymentConfig={enabled:fal
 let deliveryMap=null,deliveryPlacemark=null,deliveryLat=null,deliveryLng=null,yandexReady=false,customer=null,authMode='login',telegramContext=null,telegramPollTimer=null;
 let promoState={code:'',applied:false};
 async function get(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok){const e=new Error(d.error||'Ошибка');e.status=r.status;throw e}return d}
+
+function hideLoader(){
+  const el=$('luxLoader');
+  if(!el)return;
+  el.classList.add('hide');
+  setTimeout(()=>{ if(el && el.parentNode) el.remove(); },550);
+}
+window.addEventListener('load',()=>setTimeout(hideLoader,650));
+setTimeout(hideLoader,4500);
+
+let sliderIndex=0,sliderTimer=null;
+function setupSlider(){
+  const slides=[...document.querySelectorAll('#sliderTrack .slide')], dotsWrap=$('sliderDots');
+  if(!slides.length||!dotsWrap)return;
+  dotsWrap.innerHTML=slides.map((_,i)=>`<button type="button" data-slide="${i}" ${i===0?'class="active"':''} aria-label="Баннер ${i+1}"></button>`).join('');
+  const dots=[...dotsWrap.querySelectorAll('button')];
+  const show=i=>{
+    sliderIndex=(i+slides.length)%slides.length;
+    slides.forEach((s,n)=>s.classList.toggle('active',n===sliderIndex));
+    dots.forEach((d,n)=>d.classList.toggle('active',n===sliderIndex));
+  };
+  const restart=()=>{if(sliderTimer)clearInterval(sliderTimer);sliderTimer=setInterval(()=>show(sliderIndex+1),4500)};
+  $('prevSlide')?.addEventListener('click',()=>{show(sliderIndex-1);restart()});
+  $('nextSlide')?.addEventListener('click',()=>{show(sliderIndex+1);restart()});
+  dots.forEach((d,i)=>d.addEventListener('click',()=>{show(i);restart()}));
+  show(0);restart();
+}
+
+function setupReveal(){
+  const els=[...document.querySelectorAll('.reveal-up')];
+  if(!els.length)return;
+  if(!('IntersectionObserver' in window)){els.forEach(x=>x.classList.add('visible'));return}
+  const obs=new IntersectionObserver(entries=>entries.forEach(e=>{if(e.isIntersecting){e.target.classList.add('visible');obs.unobserve(e.target)}}),{threshold:.08});
+  els.forEach(x=>obs.observe(x));
+}
+
+function renderPopularProducts(){
+  const box=$('popularProducts');if(!box)return;
+  const arr=products.slice(0,3);
+  box.innerHTML=arr.length?arr.map((p,i)=>`<article class="popular-card"><div class="popular-photo">${p.image_url?`<img src="${p.image_url}" alt="${esc(p.name)}">`:`<span>${emoji(p.category)}</span>`}</div><div class="popular-body"><span class="popular-tag">🔥 Популярное</span><h4>${esc(p.name)}</h4><p>${i===0?'Один из любимых вариантов наших гостей.':i===1?'Отличный выбор для уютного кофейного настроения.':'Популярная позиция с красивой подачей.'}</p><div class="popular-bottom"><b>${money(p.price)} сум</b><button type="button" data-popular-add="${p.id}">В корзину</button></div></div></article>`).join(''):'<div class="empty">Популярные товары появятся после добавления меню.</div>';
+  document.querySelectorAll('[data-popular-add]').forEach(b=>b.onclick=()=>add(Number(b.dataset.popularAdd)));
+}
 function renderBusinessStatus(){
   const box=$('businessStatus');if(!box)return;
   box.className='business-status '+(businessStatus.open?'open':'closed');
@@ -42,9 +84,9 @@ async function init(){
   $('receiptOption').classList.toggle('hide',!paymentConfig.enabled);$('transferCardNumber').textContent=paymentConfig.cardNumber||'';$('transferCardHolder').textContent=paymentConfig.cardHolder?`Получатель: ${paymentConfig.cardHolder}`:'';setupDeliveryControls();setupPaymentControls();setupAccountControls();
   if(mapsConfig.enabled)loadYandexMaps().then(()=>{if(document.querySelector('input[name="deliveryType"]:checked')?.value==='delivery')initDeliveryMap()}).catch(()=>{$('mapHint').textContent='Не удалось загрузить Яндекс Карту. Адрес можно ввести вручную.'});
   else $('mapHint').textContent='Карта пока не подключена. Адрес можно ввести вручную.';
-  await loadProducts();const returnedOrder=Number(params.get('payment_order')||0);if(returnedOrder&&customer)await showPaymentResult(returnedOrder)
+  await loadProducts();setupSlider();setupReveal();hideLoader();const returnedOrder=Number(params.get('payment_order')||0);if(returnedOrder&&customer)await showPaymentResult(returnedOrder)
 }
-async function loadProducts(){products=await get('/api/public/products?branch='+branchId);$('branchName').textContent=branches.find(b=>Number(b.id)===branchId)?.name||'In coffee';renderCats();renderProducts();renderCart()}
+async function loadProducts(){products=await get('/api/public/products?branch='+branchId);$('branchName').textContent=branches.find(b=>Number(b.id)===branchId)?.name||'In coffee';renderCats();renderProducts();renderPopularProducts();renderCart()}
 function renderCats(){const cats=['Все',...new Set(products.map(p=>p.category))];$('categories').innerHTML=cats.map(c=>`<button class="chip ${c===category?'active':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('');document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{category=b.dataset.cat;renderCats();renderProducts()})}
 function emoji(cat){return /дес/i.test(cat)?'🍰':/напит|мох/i.test(cat)?'🥤':'☕'}
 function renderProducts(){const arr=category==='Все'?products:products.filter(p=>p.category===category);$('products').innerHTML=arr.length?arr.map(p=>`<div class="menu-item"><div class="menu-photo ${p.image_url?'has-photo':''}">${p.image_url?`<img src="${p.image_url}" alt="${esc(p.name)}">`:`<span>${emoji(p.category)}</span>`}</div><h3>${esc(p.name)}</h3><small>${esc(p.category)}</small><footer><b>${money(p.price)} сум</b><button data-add="${p.id}">+</button></footer></div>`).join(''):'<div class="empty">Нет товаров</div>';document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>add(Number(b.dataset.add)))}
@@ -102,4 +144,4 @@ async function setDeliveryPoint(coords,reverse=false){deliveryLat=Number(coords[
 async function findAddressOnMap(){const q=$('deliveryAddress').value.trim();if(!q)return alert('Сначала введите адрес');if(!yandexReady)return alert('Яндекс Карта пока не подключена. Адрес сохранится текстом.');if(!deliveryMap)initDeliveryMap();try{const r=await ymaps.geocode(q,{results:1}),first=r.geoObjects.get(0);if(!first)return alert('Адрес не найден');await setDeliveryPoint(first.geometry.getCoordinates(),false)}catch{alert('Не удалось найти адрес')}}
 function useMyLocation(){if(!navigator.geolocation)return alert('Геолокация не поддерживается этим браузером');$('mapHint').textContent='Определяем местоположение…';navigator.geolocation.getCurrentPosition(async pos=>{const coords=[pos.coords.latitude,pos.coords.longitude];if(yandexReady){if(!deliveryMap)initDeliveryMap(coords,16);await setDeliveryPoint(coords,true)}else{deliveryLat=coords[0];deliveryLng=coords[1];$('mapHint').textContent=`Местоположение сохранено: ${deliveryLat.toFixed(6)}, ${deliveryLng.toFixed(6)}`}},()=>alert('Не удалось получить местоположение.'),{enableHighAccuracy:true,timeout:10000,maximumAge:60000})}
 async function showPaymentResult(orderId){try{const o=await get('/api/public/order-payment/'+orderId);$('successText').textContent=o.payment_status==='paid'?`Заказ №${o.id} оплачен через Payme. Сумма: ${money(o.total)} сум.`:`Заказ №${o.id}. Статус оплаты: ${payText(o)}.`;$('success').classList.remove('hide')}catch{}}
-init().catch(e=>document.body.innerHTML=`<div class="empty">${esc(e.message)}</div>`);
+init().then(hideLoader).catch(e=>{hideLoader();document.body.innerHTML=`<div class="empty">${esc(e.message)}</div>`});
