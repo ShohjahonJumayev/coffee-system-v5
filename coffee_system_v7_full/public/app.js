@@ -6,26 +6,34 @@ const pack = o => encodeURIComponent(JSON.stringify(o)).replace(/'/g,'%27');
 const unpack = s => JSON.parse(decodeURIComponent(s));
 
 
-const categoryFallbackImage=(category='')=>{const c=String(category||'').toLowerCase();
-  if(c.includes('айс матча'))return '/assets/photos/matcha.png';if(c.includes('лимонад'))return '/assets/photos/classic-lemonade.png';if(c.includes('мохито'))return '/assets/photos/mojito.png';if(c.includes('фреш'))return '/assets/photos/fresh.png';if(c.includes('чай'))return '/assets/photos/tea.png';if(c.includes('айс кофе'))return '/assets/photos/iced-coffee.png';if(c.includes('кофе'))return '/assets/photos/hot-coffee.png';if(c.includes('милкшей'))return '/assets/photos/milkshake.png';return '';
+const categorySticker=(category='')=>{const c=String(category||'').toLowerCase();
+  if(c.includes('айс матча')) return '🍵';
+  if(c.includes('лимонад')) return '🍋';
+  if(c.includes('мохито')) return '🌿';
+  if(c.includes('фреш')) return '🍊';
+  if(c.includes('чай')) return '🫖';
+  if(c.includes('айс кофе')) return '🧊';
+  if(c.includes('кофе')) return '☕';
+  if(c.includes('милкшей')) return '🥤';
+  if(c.includes('десерт')) return '🍰';
+  if(c.includes('добавки')) return '✨';
+  return '☕';
 };
-const productSpecificImage=(name='',category='')=>{const n=String(name||'').toLowerCase(),c=String(category||'').toLowerCase();
-  if(c==='кофе'||(c.includes('кофе')&&!c.includes('айс'))){
-    if(n.includes('эспрессо')||n.includes('доппио'))return '/assets/products/espresso.jpg';
-    if(n.includes('американо'))return '/assets/products/americano.jpg';
-    if(n.includes('капучино'))return '/assets/products/cappuccino.jpg';
-    if(n.includes('латте'))return '/assets/products/latte.jpg';
-    if(n.includes('флэт')||n.includes('flat'))return '/assets/products/flatwhite.jpg';
-    if(n.includes('раф'))return '/assets/products/raf.jpg';
-    if(n.includes('мокка')||n.includes('мокко')||n.includes('mocha'))return '/assets/products/mocha.jpg';
-    return '';
-  }
-  if(c.includes('айс кофе')){if(n.includes('американо'))return '/assets/products/iced-americano.jpg';if(n.includes('капучино'))return '/assets/products/iced-cappuccino.jpg';if(n.includes('латте'))return '/assets/products/iced-latte.jpg';return '/assets/photos/iced-coffee.png';}
-  if(n.includes('чизкейк')||n.includes('cheesecake'))return '/assets/products/cheesecake.jpg';
-  if(c.includes('десерт'))return '';
-  if(c.includes('айс матча'))return '/assets/photos/matcha.png';if(c.includes('чай'))return '/assets/photos/tea.png';if(c.includes('мохито'))return '/assets/photos/mojito.png';if(c.includes('милкшей'))return '/assets/photos/milkshake.png';if(c.includes('фреш'))return '/assets/photos/fresh.png';if(c.includes('лимонад')){if(n.includes('blue ocean'))return '/assets/photos/blue-lemonade.png';if(n.includes('класс'))return '/assets/photos/classic-lemonade.png';return '/assets/photos/fruit-lemonade.png';}return categoryFallbackImage(category);};
-const productImage=p=>p?.image_url||productSpecificImage(p?.name,p?.category)||'';
-
+const productSticker=(name='',category='')=>{const n=String(name||'').toLowerCase(),c=String(category||'').toLowerCase();
+  if(n.includes('чизкейк')||n.includes('tiramisu')||n.includes('тирамису')||n.includes('торт')) return '🍰';
+  if(c.includes('десерт')) return '🍮';
+  if(c.includes('добавки')) return n.includes('сироп')?'🍯':n.includes('слив')?'🥛':n.includes('шот')?'⚡':'✨';
+  if(c.includes('чай')) return n.includes('жасмин')?'🌼':'🫖';
+  if(c.includes('айс матча')) return n.includes('клубник')?'🍓':n.includes('манго')?'🥭':n.includes('голубик')?'🫐':'🍵';
+  if(c.includes('лимонад')) return n.includes('blue ocean')?'🩵':n.includes('клубник')?'🍓':n.includes('манго')?'🥭':n.includes('мараку')?'🥭':n.includes('арбуз')?'🍉':n.includes('киви')?'🥝':'🍋';
+  if(c.includes('мохито')) return n.includes('клубник')?'🍓':n.includes('манго')?'🥭':n.includes('мараку')?'🥭':n.includes('арбуз')?'🍉':n.includes('киви')?'🥝':'🌿';
+  if(c.includes('фреш')) return n.includes('апельс')?'🍊':n.includes('яблок')?'🍏':n.includes('морков')?'🥕':'🍹';
+  if(c.includes('милкшей')) return n.includes('oreo')?'🍪':n.includes('шокол')?'🍫':n.includes('клубник')?'🍓':n.includes('банан')?'🍌':'🥤';
+  if(c.includes('айс кофе')) return n.includes('американо')?'🧊':n.includes('капучино')?'🥛':n.includes('латте')?'🥤':'🧋';
+  if(c.includes('кофе')) return n.includes('эспрессо')||n.includes('доппио')?'☕':n.includes('американо')?'☕':n.includes('капучино')?'☕':n.includes('латте')?'🥛':n.includes('флэт')?'🤍':n.includes('раф')?'🌰':n.includes('мокка')||n.includes('мокко')?'🍫':'☕';
+  return categorySticker(category);
+};
+const productImage=p=>'';
 function printerSettings(){
   const width=localStorage.getItem('inCoffeePrinterWidth')==='58'?'58':'80';
   const auto=localStorage.getItem('inCoffeePrinterAuto')==='1';
@@ -213,7 +221,7 @@ $('closeShift').onclick=async()=>{if(!confirm('Закрыть кассу и со
 async function loadProducts(){state.products=await api('/api/products');renderProducts();renderCart()}
 function renderProducts(){
   const q=$('productSearch').value.trim().toLowerCase(); const arr=state.products.filter(p=>!q||p.name.toLowerCase().includes(q)||p.category.toLowerCase().includes(q));
-  $('posProducts').innerHTML=arr.length?arr.map(p=>{const img=productImage(p);return `<button class="product-card" data-product="${p.id}"><div class="product-thumb ${img?'has-image':''}">${img?`<img src="${img}" alt="${esc(p.name)}">`:'☕'}</div><b>${esc(p.name)}</b><small>${esc(p.category)}</small><span>${money(p.price)} сум</span></button>`}).join(''):'<div class="empty">Ничего не найдено</div>';
+  $('posProducts').innerHTML=arr.length?arr.map(p=>{const icon=productSticker(p.name,p.category);return `<button class="product-card" data-product="${p.id}"><div class="product-thumb sticker-thumb"><span class="sticker-emoji">${icon}</span></div><b>${esc(p.name)}</b><small>${esc(p.category)}</small><span>${money(p.price)} сум</span></button>`}).join(''):'<div class="empty">Ничего не найдено</div>';
   document.querySelectorAll('[data-product]').forEach(b=>b.onclick=()=>addCart(Number(b.dataset.product)));
 }
 $('productSearch').oninput=renderProducts;
@@ -241,9 +249,9 @@ function deliveryMapLink(o){if(o.delivery_lat!=null&&o.delivery_lng!=null){const
 window.orderStatus=async(id,status)=>{try{await api(`/api/orders/${id}/status`,{method:'PUT',body:{status}});closeModal();toast('Статус обновлён');orders()}catch(e){toast(e.message,true)}};
 window.completeOrder=async(id,paymentMethod)=>{try{await api(`/api/orders/${id}/status`,{method:'PUT',body:{status:'completed',paymentMethod}});closeModal();toast('Заказ выдан и добавлен в продажи');orders()}catch(e){toast(e.message,true)}};
 
-async function productsAdmin(){const arr=await api('/api/products/all');$('productsList').innerHTML=arr.length?arr.map(p=>{const img=productImage(p);return `<div class="list-row product-admin-row"><div class="product-admin-info">${img?`<img src="${img}" alt="${esc(p.name)}">`:`<div class="product-fallback">☕</div>`}<div class="list-main"><b>${esc(p.name)}</b><small>${esc(p.category)} · ${money(p.price)} сум · ${p.active?'Активен':'Скрыт'}</small></div></div><div class="row-actions"><button class="mini" onclick="editProduct('${pack(p)}')">Изменить</button></div></div>`}).join(''):'<div class="empty">Нет товаров</div>'}
+async function productsAdmin(){const arr=await api('/api/products/all');$('productsList').innerHTML=arr.length?arr.map(p=>{const icon=productSticker(p.name,p.category);return `<div class="list-row product-admin-row"><div class="product-admin-info"><div class="product-fallback sticker-thumb"><span class="sticker-emoji">${icon}</span></div><div class="list-main"><b>${esc(p.name)}</b><small>${esc(p.category)} · ${money(p.price)} сум · ${p.active?'Активен':'Скрыт'}</small></div></div><div class="row-actions"><button class="mini" onclick="editProduct('${pack(p)}')">Изменить</button></div></div>`}).join(''):'<div class="empty">Нет товаров</div>'}
 $('addProduct').onclick=async()=>{try{const d=await api('/api/products',{method:'POST',body:{name:$('productName').value.trim(),category:$('productCategory').value.trim()||'Кофе',price:Number($('productPrice').value)}});const file=$('productImage').files[0];if(file)await uploadProductImage(d.product.id,file);$('productName').value='';$('productCategory').value='';$('productPrice').value='';$('productImage').value='';toast('Товар добавлен');productsAdmin()}catch(e){toast(e.message,true)}};
-window.editProduct=raw=>{const p=typeof raw==='string'?unpack(raw):raw;const img=productImage(p);openModal(`<div class="modal-head"><h2>Изменить товар</h2><button class="modal-close" onclick="closeModal()">×</button></div><div class="edit-product-image">${img?`<img src="${img}" alt="${esc(p.name)}">`:'☕'}</div><input id="mName" class="input" value="${esc(p.name)}"><input id="mCategory" class="input" value="${esc(p.category)}"><input id="mPrice" class="input" type="number" value="${p.price}"><label class="file-input wide-file">📷 Заменить фото<input id="mImage" type="file" accept="image/jpeg,image/png,image/webp"></label><label class="actions"><input id="mActive" type="checkbox" ${p.active?'checked':''}> Показывать товар</label><div class="actions"><button class="btn primary" onclick="saveProduct(${p.id})">Сохранить</button>${p.image_url?`<button class="btn danger" onclick="deleteProductImage(${p.id})">Удалить фото</button>`:''}</div><div class="muted tiny">Если фото не загружено вручную, сайт показывает подходящее фото именно для этого напитка. Для неизвестных десертов неверное фото не подставляется.</div>`)};
+window.editProduct=raw=>{const p=typeof raw==='string'?unpack(raw):raw;const icon=productSticker(p.name,p.category);openModal(`<div class="modal-head"><h2>Изменить товар</h2><button class="modal-close" onclick="closeModal()">×</button></div><div class="edit-product-image sticker-thumb"><span class="sticker-emoji large">${icon}</span></div><input id="mName" class="input" value="${esc(p.name)}"><input id="mCategory" class="input" value="${esc(p.category)}"><input id="mPrice" class="input" type="number" value="${p.price}"><label class="file-input wide-file">📷 Заменить фото<input id="mImage" type="file" accept="image/jpeg,image/png,image/webp"></label><label class="actions"><input id="mActive" type="checkbox" ${p.active?'checked':''}> Показывать товар</label><div class="actions"><button class="btn primary" onclick="saveProduct(${p.id})">Сохранить</button>${p.image_url?`<button class="btn danger" onclick="deleteProductImage(${p.id})">Удалить фото</button>`:''}</div><div class="muted tiny">Сейчас вместо фотографий в меню показываются подходящие стикеры. Фото можно загрузить позже, когда понадобятся.</div>`)};
 window.saveProduct=async id=>{try{await api('/api/products/'+id,{method:'PUT',body:{name:$('mName').value.trim(),category:$('mCategory').value.trim(),price:Number($('mPrice').value),active:$('mActive').checked}});const file=$('mImage')?.files?.[0];if(file)await uploadProductImage(id,file);closeModal();toast('Товар обновлён');productsAdmin()}catch(e){toast(e.message,true)}};
 window.deleteProductImage=async id=>{try{await api(`/api/products/${id}/image`,{method:'DELETE'});closeModal();toast('Фото удалено');productsAdmin()}catch(e){toast(e.message,true)}};
 
