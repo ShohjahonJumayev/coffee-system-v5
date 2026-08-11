@@ -23,7 +23,27 @@ function categoryFallbackImage(category=''){const c=String(category||'').toLower
 }
 function productSpecificImage(name='',category=''){
   const n=String(name||'').toLowerCase(), c=String(category||'').toLowerCase();
-  if(c.includes('айс кофе')) return '/assets/photos/iced-coffee.png';
+  // Горячий кофе — отдельная фотография для каждого вида напитка.
+  if(c==='кофе'||(c.includes('кофе')&&!c.includes('айс'))){
+    if(n.includes('эспрессо')||n.includes('доппио')) return '/assets/products/espresso.jpg';
+    if(n.includes('американо')) return '/assets/products/americano.jpg';
+    if(n.includes('капучино')) return '/assets/products/cappuccino.jpg';
+    if(n.includes('латте')) return '/assets/products/latte.jpg';
+    if(n.includes('флэт')||n.includes('flat')) return '/assets/products/flatwhite.jpg';
+    if(n.includes('раф')) return '/assets/products/raf.jpg';
+    if(n.includes('мокка')||n.includes('мокко')||n.includes('mocha')) return '/assets/products/mocha.jpg';
+    return '';
+  }
+  // Айс-кофе — Американо, Капучино и Латте больше не используют одну картинку.
+  if(c.includes('айс кофе')){
+    if(n.includes('американо')) return '/assets/products/iced-americano.jpg';
+    if(n.includes('капучино')) return '/assets/products/iced-cappuccino.jpg';
+    if(n.includes('латте')) return '/assets/products/iced-latte.jpg';
+    return '/assets/photos/iced-coffee.png';
+  }
+  // Десерты: показываем фото только когда оно соответствует товару.
+  if(n.includes('чизкейк')||n.includes('cheesecake')) return '/assets/products/cheesecake.jpg';
+  if(c.includes('десерт')) return '';
   if(c.includes('айс матча')) return '/assets/photos/matcha.png';
   if(c.includes('чай')) return '/assets/photos/tea.png';
   if(c.includes('мохито')) return '/assets/photos/mojito.png';
@@ -34,7 +54,6 @@ function productSpecificImage(name='',category=''){
     if(n.includes('класс')) return '/assets/photos/classic-lemonade.png';
     return '/assets/photos/fruit-lemonade.png';
   }
-  if(c.includes('кофе')) return '/assets/photos/hot-coffee.png';
   return categoryFallbackImage(category);
 }
 function productImage(p){return p?.image_url||productSpecificImage(p?.name,p?.category)||''}
