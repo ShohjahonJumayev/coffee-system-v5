@@ -22,34 +22,26 @@
     </div>
     <div class="lux-banner-side"><b>FIRST10</b><small>10% скидка на первый онлайн-заказ</small><span>Действует только для новых клиентов</span></div>
   </section>
-  <section class="hero-slider" id="heroSlider">
+  <section class="hero-slider photo-hero-slider" id="heroSlider">
     <div class="slider-track" id="sliderTrack">
-      <article class="slide active">
-        <div class="slide-content">
-          <span class="gold-badge">АКЦИЯ</span>
-          <h3>FIRST10 — скидка 10%</h3>
-          <p>Для первого онлайн-заказа. Войди в аккаунт и активируй промокод в корзине.</p>
-        </div>
+      <article class="slide active photo-slide" style="--slide-img:url('/assets/photos/hot-coffee.png')">
+        <div class="slide-shade"></div><div class="slide-content"><span class="gold-badge">КОФЕ</span><h3>Кофейная классика In coffee</h3><p>Эспрессо, капучино, латте, раф и другие любимые напитки в нескольких размерах.</p><a href="#productsSection" class="slide-action">Выбрать кофе</a></div>
       </article>
-      <article class="slide">
-        <div class="slide-content">
-          <span class="gold-badge">ДОСТАВКА</span>
-          <h3>Быстрый заказ с карты</h3>
-          <p>Укажи адрес, точку на Яндекс Карте и загрузи чек перевода — мы всё проверим.</p>
-        </div>
+      <article class="slide photo-slide" style="--slide-img:url('/assets/photos/matcha.png')">
+        <div class="slide-shade"></div><div class="slide-content"><span class="gold-badge">АЙС МАТЧА</span><h3>Свежая и яркая матча</h3><p>Классическая, клубничная, голубика и манго — всё в холодной подаче.</p><a href="#productsSection" class="slide-action">Смотреть матчу</a></div>
       </article>
-      <article class="slide">
-        <div class="slide-content">
-          <span class="gold-badge">PREMIUM</span>
-          <h3>Роскошный вкус каждый день</h3>
-          <p>Кофе, лимонады, мохито и другие напитки с удобным онлайн-заказом.</p>
-        </div>
+      <article class="slide photo-slide" style="--slide-img:url('/assets/photos/classic-lemonade.png')">
+        <div class="slide-shade"></div><div class="slide-content"><span class="gold-badge">ЛИМОНАДЫ</span><h3>Лёгкая свежесть со льдом</h3><p>Классический, Blue Ocean, манго, маракуйя, клубника, арбуз и киви.</p><a href="#productsSection" class="slide-action">Выбрать лимонад</a></div>
+      </article>
+      <article class="slide photo-slide" style="--slide-img:url('/assets/photos/mojito.png')">
+        <div class="slide-shade"></div><div class="slide-content"><span class="gold-badge">МОХИТО</span><h3>Мята, лайм и прохлада</h3><p>Классический и фруктовые варианты мохито для жаркого дня.</p><a href="#productsSection" class="slide-action">Смотреть мохито</a></div>
+      </article>
+      <article class="slide photo-slide" style="--slide-img:url('/assets/photos/milkshake.png')">
+        <div class="slide-shade"></div><div class="slide-content"><span class="gold-badge">МИЛКШЕЙКИ</span><h3>Густые сливочные вкусы</h3><p>Ваниль, шоколад, банан, клубника и Oreo.</p><a href="#productsSection" class="slide-action">Выбрать милкшейк</a></div>
       </article>
     </div>
     <div class="slider-controls">
-      <button id="prevSlide" type="button">‹</button>
-      <div class="slider-dots" id="sliderDots"></div>
-      <button id="nextSlide" type="button">›</button>
+      <button id="prevSlide" type="button">‹</button><div class="slider-dots" id="sliderDots"></div><button id="nextSlide" type="button">›</button>
     </div>
   </section>
   <div class="branch-box reveal-up"><label>Филиал</label><select id="branchSelect"></select></div>
@@ -70,6 +62,7 @@
     <div><b>💳 Оплата по чеку</b><small>Безопасное подтверждение через аккаунт клиента</small></div>
   </section>
   <div id="categories" class="chips reveal-up"></div>
+  <section id="categoryHero" class="category-hero reveal-up hide"></section>
   <div id="productsSection" class="reveal-up"><div id="products" class="menu-grid"></div></div>
   <section class="vip-story reveal-up">
     <div class="story-card">

@@ -9,6 +9,61 @@ function promoCodeValue(){return String(paymentConfig?.promoCode||FIRST_ORDER_PR
 function promoPercentValue(){const n=Number(paymentConfig?.promoPercent||FIRST_ORDER_PROMO_PERCENT);return Number.isFinite(n)&&n>0?n:FIRST_ORDER_PROMO_PERCENT}
 async function get(url,opts){const r=await fetch(url,opts);let d={};try{d=await r.json()}catch{}if(!r.ok){const e=new Error(d.error||'Ошибка');e.status=r.status;throw e}return d}
 
+function categoryFallbackImage(category=''){const c=String(category||'').toLowerCase();
+  if(c.includes('айс матча')) return '/assets/photos/matcha.png';
+  if(c.includes('лимонад')) return '/assets/photos/classic-lemonade.png';
+  if(c.includes('мохито')) return '/assets/photos/mojito.png';
+  if(c.includes('фреш')) return '/assets/photos/fresh.png';
+  if(c==='чай' || c.includes('чай')) return '/assets/photos/tea.png';
+  if(c.includes('айс кофе')) return '/assets/photos/iced-coffee.png';
+  if(c.includes('кофе')) return '/assets/photos/hot-coffee.png';
+  if(c.includes('милкшей')) return '/assets/photos/milkshake.png';
+  if(c.includes('добавки')) return '/assets/photos/hot-coffee.png';
+  return '';
+}
+function productSpecificImage(name='',category=''){
+  const n=String(name||'').toLowerCase(), c=String(category||'').toLowerCase();
+  if(c.includes('айс кофе')) return '/assets/photos/iced-coffee.png';
+  if(c.includes('айс матча')) return '/assets/photos/matcha.png';
+  if(c.includes('чай')) return '/assets/photos/tea.png';
+  if(c.includes('мохито')) return '/assets/photos/mojito.png';
+  if(c.includes('милкшей')) return '/assets/photos/milkshake.png';
+  if(c.includes('фреш')) return '/assets/photos/fresh.png';
+  if(c.includes('лимонад')){
+    if(n.includes('blue ocean')) return '/assets/photos/blue-lemonade.png';
+    if(n.includes('класс')) return '/assets/photos/classic-lemonade.png';
+    return '/assets/photos/fruit-lemonade.png';
+  }
+  if(c.includes('кофе')) return '/assets/photos/hot-coffee.png';
+  return categoryFallbackImage(category);
+}
+function productImage(p){return p?.image_url||productSpecificImage(p?.name,p?.category)||''}
+function productToneClass(p){const n=String(p?.name||'').toLowerCase();
+  if(n.includes('blue ocean')||n.includes('голубик'))return 'tone-blue';
+  if(n.includes('клубник'))return 'tone-strawberry';
+  if(n.includes('манго'))return 'tone-mango';
+  if(n.includes('мараку'))return 'tone-passion';
+  if(n.includes('арбуз'))return 'tone-watermelon';
+  if(n.includes('киви'))return 'tone-kiwi';
+  if(n.includes('банан'))return 'tone-banana';
+  if(n.includes('oreo'))return 'tone-oreo';
+  if(n.includes('шоколад')||n.includes('мокка'))return 'tone-choco';
+  return '';
+}
+function productVolume(name=''){const m=String(name).match(/\((\d+)\s*мл\)/i);return m?`${m[1]} мл`:''}
+const categoryHeroMap={
+  'Все':{title:'Всё меню In coffee',text:'Кофе, лимонады, мохито, чай, милкшейки и другие позиции в одном премиальном меню.',img:'/assets/photos/hot-coffee.png'},
+  'Кофе':{title:'Кофейная классика',text:'Эспрессо, американо, капучино, латте, флэт уайт, раф и мокка — выбери свой идеальный вкус.',img:'/assets/photos/hot-coffee.png'},
+  'Айс кофе':{title:'Освежающий айс кофе',text:'Холодные кофейные напитки с мягким вкусом и красивой подачей.',img:'/assets/photos/iced-coffee.png'},
+  'Айс матча':{title:'Нежная айс матча',text:'Матча в холодной подаче — ярко, стильно и свежо.',img:'/assets/photos/matcha.png'},
+  'Чай':{title:'Тёплый чайный раздел',text:'Чёрный, зелёный, жасминовый и фруктовый чай для спокойного настроения.',img:'/assets/photos/tea.png'},
+  'Лимонады':{title:'Лимонады и яркие вкусы',text:'Классические и фруктовые лимонады для лёгкой свежести в течение дня.',img:'/assets/photos/classic-lemonade.png'},
+  'Мохито':{title:'Мохито со льдом и мятой',text:'Освежающий мохито с лаймом и мятой — идеальный выбор для жаркого дня.',img:'/assets/photos/mojito.png'},
+  'Милкшейки':{title:'Сливочные милкшейки',text:'Густые и сладкие милкшейки с мягкой текстурой и насыщенным вкусом.',img:'/assets/photos/milkshake.png'},
+  'Фреши':{title:'Свежевыжатые фреши',text:'Яркие фруктовые напитки для свежести и витаминов.',img:'/assets/photos/fresh.png'},
+  'Добавки':{title:'Добавки к напиткам',text:'Сделай любимый напиток ещё интереснее с сиропом, пюре, джус-болами и другими дополнениями.',img:'/assets/photos/hot-coffee.png'}
+};
+
 async function copyText(value){
   const text=String(value||'').trim();
   if(!text)throw new Error('Нечего копировать');
@@ -82,7 +137,7 @@ function setupReveal(){
 function renderPopularProducts(){
   const box=$('popularProducts');if(!box)return;
   const arr=products.slice(0,3);
-  box.innerHTML=arr.length?arr.map((p,i)=>`<article class="popular-card"><div class="popular-photo">${p.image_url?`<img src="${p.image_url}" alt="${esc(p.name)}">`:`<span>${emoji(p.category)}</span>`}</div><div class="popular-body"><span class="popular-tag">🔥 Популярное</span><h4>${esc(p.name)}</h4><p>${i===0?'Один из любимых вариантов наших гостей.':i===1?'Отличный выбор для уютного кофейного настроения.':'Популярная позиция с красивой подачей.'}</p><div class="popular-bottom"><b>${money(p.price)} сум</b><button type="button" data-popular-add="${p.id}">В корзину</button></div></div></article>`).join(''):'<div class="empty">Популярные товары появятся после добавления меню.</div>';
+  box.innerHTML=arr.length?arr.map((p,i)=>{const img=productImage(p),tone=productToneClass(p),vol=productVolume(p.name);return `<article class="popular-card"><div class="popular-photo ${tone}">${img?`<img src="${img}" alt="${esc(p.name)}">`:`<span>${emoji(p.category)}</span>`}${vol?`<span class="photo-volume">${vol}</span>`:''}</div><div class="popular-body"><span class="popular-tag">🔥 Популярное</span><h4>${esc(p.name)}</h4><p>${i===0?'Один из любимых вариантов наших гостей.':i===1?'Отличный выбор для уютного кофейного настроения.':'Популярная позиция с красивой подачей.'}</p><div class="popular-bottom"><b>${money(p.price)} сум</b><button type="button" data-popular-add="${p.id}">В корзину</button></div></div></article>`}).join(''):'<div class="empty">Популярные товары появятся после добавления меню.</div>';
   document.querySelectorAll('[data-popular-add]').forEach(b=>b.onclick=()=>add(Number(b.dataset.popularAdd)));
 }
 function renderBusinessStatus(){
@@ -124,10 +179,11 @@ async function init(){
   else $('mapHint').textContent='Карта пока не подключена. Адрес можно ввести вручную.';
   await loadProducts();setupSlider();setupReveal();hideLoader();const returnedOrder=Number(params.get('payment_order')||0);if(returnedOrder&&customer)await showPaymentResult(returnedOrder)
 }
-async function loadProducts(){products=await get('/api/public/products?branch='+branchId);$('branchName').textContent=branches.find(b=>Number(b.id)===branchId)?.name||'In coffee';renderCats();renderProducts();renderPopularProducts();renderCart()}
-function renderCats(){const cats=['Все',...new Set(products.map(p=>p.category))];$('categories').innerHTML=cats.map(c=>`<button class="chip ${c===category?'active':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('');document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{category=b.dataset.cat;renderCats();renderProducts()})}
+function renderCategoryHero(){const box=$('categoryHero');if(!box)return;const info=categoryHeroMap[category]||{title:category,text:'Подборка напитков этой категории.',img:categoryFallbackImage(category)};if(!info?.img){box.classList.add('hide');return}box.classList.remove('hide');box.innerHTML=`<div class="category-hero-copy"><span class="section-kicker">${esc(category==='Все'?'Подборка':'Категория')}</span><h3>${esc(info.title)}</h3><p>${esc(info.text)}</p></div><div class="category-hero-image"><img src="${info.img}" alt="${esc(info.title)}"></div>`}
+async function loadProducts(){products=await get('/api/public/products?branch='+branchId);$('branchName').textContent=branches.find(b=>Number(b.id)===branchId)?.name||'In coffee';renderCats();renderCategoryHero();renderProducts();renderPopularProducts();renderCart()}
+function renderCats(){const cats=['Все',...new Set(products.map(p=>p.category))];$('categories').innerHTML=cats.map(c=>`<button class="chip ${c===category?'active':''}" data-cat="${esc(c)}">${esc(c)}</button>`).join('');document.querySelectorAll('[data-cat]').forEach(b=>b.onclick=()=>{category=b.dataset.cat;renderCats();renderCategoryHero();renderProducts()})}
 function emoji(cat){return /дес/i.test(cat)?'🍰':/напит|мох/i.test(cat)?'🥤':'☕'}
-function renderProducts(){const arr=category==='Все'?products:products.filter(p=>p.category===category);$('products').innerHTML=arr.length?arr.map(p=>`<div class="menu-item"><div class="menu-photo ${p.image_url?'has-photo':''}">${p.image_url?`<img src="${p.image_url}" alt="${esc(p.name)}">`:`<span>${emoji(p.category)}</span>`}</div><h3>${esc(p.name)}</h3><small>${esc(p.category)}</small><footer><b>${money(p.price)} сум</b><button data-add="${p.id}">+</button></footer></div>`).join(''):'<div class="empty">Нет товаров</div>';document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>add(Number(b.dataset.add)))}
+function renderProducts(){const arr=category==='Все'?products:products.filter(p=>p.category===category);$('products').innerHTML=arr.length?arr.map(p=>{const img=productImage(p),tone=productToneClass(p),vol=productVolume(p.name);return `<div class="menu-item"><div class="menu-photo ${img?'has-photo':''} ${tone}">${img?`<img src="${img}" alt="${esc(p.name)}">`:`<span>${emoji(p.category)}</span>`}${vol?`<span class="photo-volume">${vol}</span>`:''}</div><h3>${esc(p.name)}</h3><small>${esc(p.category)}</small><footer><b>${money(p.price)} сум</b><button data-add="${p.id}">+</button></footer></div>`}).join(''):'<div class="empty">Нет товаров</div>';document.querySelectorAll('[data-add]').forEach(b=>b.onclick=()=>add(Number(b.dataset.add)))}
 function add(id){const p=products.find(x=>Number(x.id)===id);const f=cart.find(x=>x.productId===id);if(f)f.quantity++;else cart.push({productId:id,name:p.name,price:Number(p.price),quantity:1});renderCart()}
 function renderCart(){const subtotal=currentSubtotal(),discount=currentDiscount(),total=Math.max(0,subtotal-discount),count=cart.reduce((s,x)=>s+x.quantity,0);$('total').textContent=money(total);$('drawerSubtotal').textContent=money(subtotal);$('drawerDiscount').textContent=money(discount);$('drawerTotal').textContent=money(total);$('count').textContent=count;$('discountRow').classList.toggle('hide',!discount);$('promoAppliedCode').textContent=promoState.code||promoCodeValue();$('cartList').innerHTML=cart.length?cart.map(x=>`<div class="cart-row"><div><b>${esc(x.name)}</b><br><small>${money(x.price)} сум</small></div><div class="cart-actions"><button onclick="change(${x.productId},-1)">−</button><b>${x.quantity}</b><button onclick="change(${x.productId},1)">+</button></div></div>`).join(''):'<div class="empty">Корзина пуста</div>';if(!cart.length&&$('promoCode').value&&!promoState.applied){setPromoStatus('Добавьте товары в корзину, затем примените промокод.','info')}else if(!promoState.code){setPromoStatus(customer?(promoEligible()?`Введите ${promoCodeValue()} и получите ${promoPercentValue()}% скидку на первый заказ.`:`Промокод ${promoCodeValue()} доступен только на первый заказ.`):'Войдите в аккаунт клиента, чтобы использовать промокод на первый заказ.','info')}if($('payAmountPreview'))$('payAmountPreview').textContent=money(total);renderCustomerState()}
 window.change=(id,d)=>{const x=cart.find(i=>i.productId===id);if(!x)return;x.quantity+=d;if(x.quantity<=0)cart=cart.filter(i=>i.productId!==id);renderCart()};
